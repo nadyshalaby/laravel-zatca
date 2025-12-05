@@ -1,0 +1,64 @@
+{
+    "name": "corecave/laravel-zatca",
+    "description": "Laravel package for ZATCA e-invoicing integration (Saudi Arabia Phase 2)",
+    "keywords": [
+        "laravel",
+        "zatca",
+        "e-invoice",
+        "saudi-arabia",
+        "fatoora",
+        "vat",
+        "einvoicing",
+        "tax",
+        "ksa"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "CoreCave",
+            "email": "dev@corecave.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/database": "^10.0|^11.0|^12.0",
+        "phpseclib/phpseclib": "^3.0",
+        "robrichards/xmlseclibs": "^3.1",
+        "sabre/xml": "^4.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "pestphp/pest": "^2.0|^3.0",
+        "pestphp/pest-plugin-laravel": "^2.0|^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Corecave\\Zatca\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Corecave\\Zatca\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Corecave\\Zatca\\ZatcaServiceProvider"
+            ],
+            "aliases": {
+                "Zatca": "Corecave\\Zatca\\Facades\\Zatca"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
