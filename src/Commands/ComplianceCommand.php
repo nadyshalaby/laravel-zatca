@@ -217,7 +217,7 @@ class ComplianceCommand extends Command
                 $status = $response['validationResults']['status'] ?? 'UNKNOWN';
 
                 if (strtoupper($status) === 'PASS') {
-                    $this->info("    PASS");
+                    $this->info('    PASS');
                     $passed++;
                 } else {
                     $this->error("    FAIL: {$status}");

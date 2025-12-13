@@ -10,6 +10,7 @@ use Corecave\Zatca\Commands\GenerateCsrCommand;
 use Corecave\Zatca\Commands\ProductionCsidCommand;
 use Corecave\Zatca\Commands\RenewCsidCommand;
 use Corecave\Zatca\Contracts\ApiClientInterface;
+use Corecave\Zatca\Debug\DebugDumper;
 use Corecave\Zatca\Hash\HashChainManager;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Qr\QrGenerator;
@@ -56,27 +57,27 @@ class ZatcaServiceProvider extends ServiceProvider
 
         // Register UBL generator
         $this->app->singleton(UblGenerator::class, function ($app) {
-            return new UblGenerator();
+            return new UblGenerator;
         });
 
         // Register XML signer
         $this->app->singleton(XmlSigner::class, function ($app) {
-            return new XmlSigner();
+            return new XmlSigner;
         });
 
         // Register XML validator
         $this->app->singleton(XmlValidator::class, function ($app) {
-            return new XmlValidator();
+            return new XmlValidator;
         });
 
         // Register QR generator
         $this->app->singleton(QrGenerator::class, function ($app) {
-            return new QrGenerator();
+            return new QrGenerator;
         });
 
         // Register hash chain manager
         $this->app->singleton(HashChainManager::class, function ($app) {
-            return new HashChainManager();
+            return new HashChainManager;
         });
 
         // Register invoice builder
@@ -85,6 +86,11 @@ class ZatcaServiceProvider extends ServiceProvider
                 config('zatca.seller', []),
                 config('zatca.invoice', [])
             );
+        });
+
+        // Register debug dumper
+        $this->app->singleton(DebugDumper::class, function ($app) {
+            return new DebugDumper;
         });
     }
 
@@ -129,6 +135,7 @@ class ZatcaServiceProvider extends ServiceProvider
             QrGenerator::class,
             HashChainManager::class,
             InvoiceBuilder::class,
+            DebugDumper::class,
         ];
     }
 }

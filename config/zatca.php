@@ -247,6 +247,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Debug Settings
+    |--------------------------------------------------------------------------
+    |
+    | Debug configuration for ZATCA invoice processing.
+    | When enabled, generated XML and QR codes are dumped to files.
+    |
+    */
+    'debug' => [
+        // Enable/disable debug file dumping
+        'enabled' => env('ZATCA_DEBUG_ENABLED', false),
+
+        // Directory to store debug files (relative to storage_path)
+        'path' => env('ZATCA_DEBUG_PATH', 'zatca/debug'),
+
+        // Dump unsigned XML before signing
+        'dump_unsigned_xml' => env('ZATCA_DEBUG_DUMP_UNSIGNED', true),
+
+        // Dump signed XML after signing
+        'dump_signed_xml' => env('ZATCA_DEBUG_DUMP_SIGNED', true),
+
+        // Dump QR code data
+        'dump_qr' => env('ZATCA_DEBUG_DUMP_QR', true),
+
+        // Dump invoice hash
+        'dump_hash' => env('ZATCA_DEBUG_DUMP_HASH', true),
+
+        // Include timestamp in filenames
+        'timestamp_files' => env('ZATCA_DEBUG_TIMESTAMP', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Database Tables
     |--------------------------------------------------------------------------
     |

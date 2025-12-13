@@ -468,8 +468,7 @@ class InvoiceBuilder
      */
     public function sample(): InvoiceInterface
     {
-        return $this
-            ->setInvoiceNumber('SME00001')
+        $this->setInvoiceNumber('SME00001')
             ->setIssueDate(Carbon::now())
             ->addLineItem([
                 'name' => 'Sample Item',
@@ -477,7 +476,31 @@ class InvoiceBuilder
                 'unit_price' => 100.00,
                 'vat_category' => VatCategory::STANDARD,
                 'vat_rate' => 15.00,
-            ])
-            ->build();
+            ]);
+
+        // Standard invoices require buyer with full address
+        if (! $this->isSimplified) {
+            $this->setBuyer([
+                'name' => 'Sample Buyer',
+                'vat_number' => '310122393500003',
+                'registration_number' => '3101223935',
+                'address' => [
+                    'street' => 'Sample Street',
+                    'building' => '1234',
+                    'city' => 'Riyadh',
+                    'postal_code' => '12345',
+                    'district' => 'Sample District',
+                    'country' => 'SA',
+                ],
+            ]);
+        }
+
+        // Credit/debit notes require original invoice reference and reason
+        if ($this->isCreditNote || $this->isDebitNote) {
+            $this->setOriginalInvoice('INV-2024-001')
+                ->setReason('Correction of invoice');
+        }
+
+        return $this->build();
     }
 }

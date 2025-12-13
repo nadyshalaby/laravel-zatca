@@ -21,7 +21,16 @@ class HashChainManager
     public function getNextIcv(): int
     {
         return DB::transaction(function () {
-            $maxIcv = ZatcaInvoice::lockForUpdate()->max('icv');
+            // PostgreSQL doesn't support FOR UPDATE with aggregate functions.
+            // Lock the table to ensure atomicity, then get max ICV.
+            $driver = DB::connection()->getDriverName();
+
+            if ($driver === 'pgsql') {
+                // Use advisory lock for PostgreSQL
+                DB::select('SELECT pg_advisory_xact_lock(1)');
+            }
+
+            $maxIcv = ZatcaInvoice::max('icv');
 
             return ($maxIcv ?? 0) + 1;
         });

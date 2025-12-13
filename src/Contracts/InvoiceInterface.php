@@ -55,6 +55,11 @@ interface InvoiceInterface
     public function getSeller(): array;
 
     /**
+     * Get the seller's VAT registration number.
+     */
+    public function getSellerVatNumber(): string;
+
+    /**
      * Get buyer information.
      */
     public function getBuyer(): ?array;

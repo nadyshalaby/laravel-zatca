@@ -3,25 +3,28 @@
 namespace Corecave\Zatca\Certificate;
 
 use Corecave\Zatca\Exceptions\CertificateException;
-use phpseclib3\Crypt\EC;
-use phpseclib3\File\ASN1;
-use phpseclib3\File\X509;
 
 class CsrGenerator
 {
     protected array $config;
 
     /**
-     * ZATCA Certificate Template OID.
+     * ZATCA Certificate Template Name.
      */
-    private const ZATCA_TEMPLATE_OID = '1.3.6.1.4.1.311.20.2';
+    private const ZATCA_TEMPLATE_NAME = 'ZATCA-Code-Signing';
 
     /**
-     * ZATCA-specific extension OIDs.
+     * ZATCA-specific OIDs for Subject Alternative Name extensions.
      */
-    private const ZATCA_EXTENSION_OIDS = [
-        'certificateTemplateName' => '1.3.6.1.4.1.311.20.2',
-    ];
+    private const OID_SN = '2.5.4.4';                    // Serial Number
+
+    private const OID_UID = '0.9.2342.19200300.100.1.1'; // User ID (VAT Number)
+
+    private const OID_TITLE = '2.5.4.12';                // Title (Invoice Types)
+
+    private const OID_REGISTERED_ADDRESS = '2.5.4.26';   // Registered Address
+
+    private const OID_BUSINESS_CATEGORY = '2.5.4.15';    // Business Category
 
     public function __construct(array $config = [])
     {
@@ -41,34 +44,111 @@ class CsrGenerator
         $this->validateConfig($config);
 
         try {
-            // Generate ECDSA private key with secp256k1 curve (required by ZATCA)
-            $privateKey = EC::createKey('secp256k1');
+            // Create OpenSSL config for ZATCA-compliant CSR
+            $opensslConfig = $this->buildOpensslConfig($config);
 
-            // Create X509 instance for CSR
-            $x509 = new X509;
-            $x509->setPrivateKey($privateKey);
+            // Write temporary config file
+            $configFile = tempnam(sys_get_temp_dir(), 'zatca_csr_');
+            file_put_contents($configFile, $opensslConfig);
 
-            // Build the Distinguished Name (DN)
+            // Generate EC private key with secp256k1 curve (required by ZATCA)
+            $privateKeyResource = openssl_pkey_new([
+                'config' => $configFile,
+                'private_key_type' => OPENSSL_KEYTYPE_EC,
+                'curve_name' => 'secp256k1',
+            ]);
+
+            if ($privateKeyResource === false) {
+                throw new \Exception('Failed to generate private key: '.openssl_error_string());
+            }
+
+            // Export private key
+            openssl_pkey_export($privateKeyResource, $privateKey);
+
+            // Get public key
+            $keyDetails = openssl_pkey_get_details($privateKeyResource);
+            $publicKey = $keyDetails['key'];
+
+            // Build Distinguished Name
             $dn = $this->buildDistinguishedName($config);
-            $x509->setDN($dn);
 
-            // Load CSR
-            $x509->loadCSR($x509->saveCSR($x509->signCSR()));
+            // Generate CSR with custom config
+            $csrResource = openssl_csr_new(
+                $dn,
+                $privateKeyResource,
+                [
+                    'config' => $configFile,
+                    'req_extensions' => 'req_ext',
+                    'digest_alg' => 'sha256',
+                ]
+            );
 
-            // Add ZATCA-specific extensions
-            $this->addZatcaExtensions($x509, $config);
+            if ($csrResource === false) {
+                throw new \Exception('Failed to generate CSR: '.openssl_error_string());
+            }
 
-            // Sign the CSR
-            $csr = $x509->signCSR();
+            // Export CSR
+            openssl_csr_export($csrResource, $csr);
+
+            // Clean up temp file
+            @unlink($configFile);
 
             return [
-                'csr' => $x509->saveCSR($csr),
-                'private_key' => $privateKey->toString('PKCS8'),
-                'public_key' => $privateKey->getPublicKey()->toString('PKCS8'),
+                'csr' => $csr,
+                'private_key' => $privateKey,
+                'public_key' => $publicKey,
             ];
         } catch (\Exception $e) {
             throw CertificateException::csrGenerationFailed($e->getMessage());
         }
+    }
+
+    /**
+     * Build OpenSSL configuration for ZATCA-compliant CSR.
+     */
+    protected function buildOpensslConfig(array $config): string
+    {
+        $serialNumber = $config['serial_number'] ?? '1-TST|2-TST|3-'.$this->generateUuid();
+        $vatNumber = $config['vat_number'];
+        $invoiceTypes = $config['invoice_types'] ?? '1100';
+        $location = $config['location'] ?? [];
+        $address = is_array($location)
+            ? ($location['city'] ?? 'Riyadh')
+            : $location;
+        $businessCategory = $config['business_category'] ?? 'Technology';
+        $templateName = self::ZATCA_TEMPLATE_NAME;
+
+        return <<<EOT
+# ZATCA CSR Configuration
+oid_section = OIDs
+
+[OIDs]
+certificateTemplateName = 1.3.6.1.4.1.311.20.2
+
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+req_extensions = req_ext
+distinguished_name = dn
+
+[dn]
+C = SA
+O = {$config['organization']}
+OU = {$config['organization_unit']}
+CN = {$config['common_name']}
+
+[req_ext]
+certificateTemplateName = ASN1:PRINTABLESTRING:{$templateName}
+subjectAltName = dirName:alt_names
+
+[alt_names]
+SN = {$serialNumber}
+UID = {$vatNumber}
+title = {$invoiceTypes}
+registeredAddress = {$address}
+businessCategory = {$businessCategory}
+EOT;
     }
 
     /**
@@ -100,49 +180,12 @@ class CsrGenerator
      */
     protected function buildDistinguishedName(array $config): array
     {
-        $dn = [
-            'countryName' => $config['country'] ?? 'SA',
+        return [
+            'countryName' => 'SA',
             'organizationName' => $config['organization'],
             'organizationalUnitName' => $config['organization_unit'],
             'commonName' => $config['common_name'],
         ];
-
-        return $dn;
-    }
-
-    /**
-     * Add ZATCA-specific extensions to the CSR.
-     */
-    protected function addZatcaExtensions(X509 $x509, array $config): void
-    {
-        // The extensions for ZATCA CSR include:
-        // 1. Serial Number (SN) - format: 1-CompanyName|2-Version|3-UUID
-        // 2. UID - VAT registration number (15 digits)
-        // 3. Title - Invoice types (1000, 0100, or 1100)
-        // 4. Business Category
-        // 5. Location details
-
-        // Note: phpseclib handles some extensions automatically through DN
-        // For ZATCA-specific extensions, we need to add them as custom attributes
-
-        // Set the Subject Alternative Name extension if needed
-        if (! empty($config['common_name'])) {
-            $x509->setDNProp('commonName', $config['common_name']);
-        }
-
-        // Register custom OIDs for ZATCA
-        $this->registerZatcaOids();
-    }
-
-    /**
-     * Register ZATCA-specific OIDs.
-     */
-    protected function registerZatcaOids(): void
-    {
-        // Register the certificate template name OID
-        ASN1::loadOIDs([
-            'certificateTemplateName' => self::ZATCA_TEMPLATE_OID,
-        ]);
     }
 
     /**
@@ -178,17 +221,13 @@ class CsrGenerator
 
     /**
      * Build the CSR content as base64 for ZATCA API submission.
+     *
+     * ZATCA requires the full PEM-formatted CSR to be base64 encoded,
+     * including the BEGIN/END headers.
      */
     public function encodeForApi(string $csr): string
     {
-        // Remove PEM headers and encode
-        $csrContent = str_replace(
-            ['-----BEGIN CERTIFICATE REQUEST-----', '-----END CERTIFICATE REQUEST-----', "\n", "\r"],
-            '',
-            $csr
-        );
-
-        return trim($csrContent);
+        return base64_encode($csr);
     }
 
     /**
@@ -196,18 +235,18 @@ class CsrGenerator
      */
     public function parse(string $csr): array
     {
-        $x509 = new X509;
-        $csrData = $x509->loadCSR($csr);
+        $csrResource = openssl_csr_get_subject($csr, true);
 
-        if ($csrData === false) {
+        if ($csrResource === false) {
             throw CertificateException::csrGenerationFailed('Invalid CSR format');
         }
 
+        $publicKey = openssl_csr_get_public_key($csr);
+        $publicKeyDetails = openssl_pkey_get_details($publicKey);
+
         return [
-            'subject' => $x509->getDN(X509::DN_STRING),
-            'subject_array' => $x509->getDN(X509::DN_HASH),
-            'public_key' => $x509->getPublicKey()->toString('PKCS8'),
-            'signature_algorithm' => $csrData['signatureAlgorithm']['algorithm'] ?? null,
+            'subject' => $csrResource,
+            'public_key' => $publicKeyDetails['key'] ?? null,
         ];
     }
 
@@ -217,22 +256,42 @@ class CsrGenerator
     public function verifyKeyPair(string $csr, string $privateKey): bool
     {
         try {
-            $x509 = new X509;
-            $csrData = $x509->loadCSR($csr);
-
-            if ($csrData === false) {
+            $csrPublicKey = openssl_csr_get_public_key($csr);
+            if ($csrPublicKey === false) {
                 return false;
             }
 
-            $csrPublicKey = $x509->getPublicKey()->toString('PKCS8');
+            $csrKeyDetails = openssl_pkey_get_details($csrPublicKey);
+            $privateKeyResource = openssl_pkey_get_private($privateKey);
 
-            $key = EC::loadPrivateKey($privateKey);
-            $derivedPublicKey = $key->getPublicKey()->toString('PKCS8');
+            if ($privateKeyResource === false) {
+                return false;
+            }
 
-            return $csrPublicKey === $derivedPublicKey;
+            $privateKeyDetails = openssl_pkey_get_details($privateKeyResource);
+
+            return $csrKeyDetails['key'] === $privateKeyDetails['key'];
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Generate a UUID v4.
+     */
+    protected function generateUuid(): string
+    {
+        return sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xFFFF),
+            mt_rand(0, 0xFFFF),
+            mt_rand(0, 0xFFFF),
+            mt_rand(0, 0x0FFF) | 0x4000,
+            mt_rand(0, 0x3FFF) | 0x8000,
+            mt_rand(0, 0xFFFF),
+            mt_rand(0, 0xFFFF),
+            mt_rand(0, 0xFFFF)
+        );
     }
 
     /**

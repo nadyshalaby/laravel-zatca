@@ -62,7 +62,7 @@ enum InvoiceSubType: string
      */
     public function isStandard(): bool
     {
-        return !$this->isSimplified();
+        return ! $this->isSimplified();
     }
 
     /**

@@ -55,9 +55,38 @@ class ApiException extends ZatcaException
     public static function fromResponse(ResponseInterface $response, array $body = []): static
     {
         $statusCode = $response->getStatusCode();
-        $message = $body['message'] ?? "ZATCA API request failed with status {$statusCode}";
-        $errors = $body['validationResults']['errorMessages'] ?? [];
-        $warnings = $body['validationResults']['warningMessages'] ?? [];
+
+        // ZATCA API returns errors in different formats depending on the endpoint
+        // Try multiple possible error message locations
+        $message = $body['message']
+            ?? $body['errorMessage']
+            ?? $body['error']
+            ?? "ZATCA API request failed with status {$statusCode}";
+
+        // Include error code and category if available
+        if (isset($body['errorCode']) || isset($body['errorCategory'])) {
+            $errorCode = $body['errorCode'] ?? '';
+            $errorCategory = $body['errorCategory'] ?? '';
+            if ($errorCode || $errorCategory) {
+                $message .= " [{$errorCategory}] Code: {$errorCode}";
+            }
+        }
+
+        // Try multiple possible error array locations
+        $errors = $body['validationResults']['errorMessages']
+            ?? $body['errors']
+            ?? $body['errorMessages']
+            ?? [];
+
+        // If errors is a string, wrap it in an array
+        if (is_string($errors)) {
+            $errors = [['message' => $errors]];
+        }
+
+        $warnings = $body['validationResults']['warningMessages']
+            ?? $body['warnings']
+            ?? $body['warningMessages']
+            ?? [];
 
         return new static($message, $statusCode, $response, $errors, $warnings);
     }

@@ -10,7 +10,7 @@ This package supports Phase 2 requirements including:
 - Invoice reporting (B2C simplified invoices)
 - Invoice clearance (B2B standard invoices)
 - Credit and debit note handling
-- Sandbox and production environments
+- Sandbox, simulation, and production environments
 
 ## Requirements
 
@@ -43,7 +43,7 @@ Add these environment variables to your `.env` file:
 
 ```env
 # Environment: sandbox, simulation, or production
-ZATCA_ENVIRONMENT=sandbox
+ZATCA_ENVIRONMENT=simulation
 
 # Seller Information
 ZATCA_SELLER_NAME="Your Company Name"
@@ -63,7 +63,26 @@ ZATCA_CSR_ORGANIZATION="Your Company Name"
 ZATCA_CSR_ORGANIZATION_UNIT="Main Branch"
 ZATCA_CSR_COMMON_NAME="Your Company Name"
 ZATCA_INVOICE_TYPES=1100
+
+# Debug (optional)
+ZATCA_DEBUG_ENABLED=true
+ZATCA_DEBUG_PATH=zatca/debug
 ```
+
+## Environments
+
+The package supports three environments:
+
+| Environment | Endpoint | Certificate Issuer | Purpose |
+|-------------|----------|-------------------|---------|
+| `sandbox` | developer-portal | `CN=eInvoicing` (mock) | Basic development testing |
+| `simulation` | simulation | `CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local` | Real testing with ZATCA |
+| `production` | core | `CN=PEZEINVOICESCA2-CA, DC=extgazt, DC=gov, DC=local` | Live production |
+
+**Important:**
+- The `sandbox` environment returns mock certificates that will NOT pass ZATCA's official validators
+- Use `simulation` for testing with the ZATCA validator at https://sandbox.zatca.gov.sa/Compliance
+- Use `production` only when ready to go live
 
 ## Onboarding Process
 
@@ -131,6 +150,8 @@ if ($result->isSuccess()) {
 
 ### Creating a Standard Invoice (B2B)
 
+For standard B2B invoices, buyer information is **required** and must include complete address details for Saudi Arabian buyers.
+
 ```php
 use Corecave\Zatca\Facades\Zatca;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
@@ -140,13 +161,15 @@ $invoice = InvoiceBuilder::standard()
     ->setIssueDate(now())
     ->setBuyer([
         'name' => 'Buyer Company LLC',
-        'vat_number' => '300000000000003',
-        'registration_number' => '1234567890',
+        'vat_number' => '300000000000003',        // Used for TIN scheme if no registration_number
+        'registration_number' => '1234567890',   // CRN - Commercial Registration Number
+        'registration_scheme' => 'CRN',          // Optional: CRN, MOM, MLS, SAG, 700, OTH
         'address' => [
             'street' => 'King Fahd Road',
-            'building' => '1234',
+            'building' => '1234',                // Required for SA buyers (KSA-18)
+            'additional_number' => '5678',       // Optional (KSA-23)
             'city' => 'Riyadh',
-            'district' => 'Al Olaya',
+            'district' => 'Al Olaya',            // Required for SA buyers (KSA-4)
             'postal_code' => '12345',
             'country' => 'SA',
         ],
@@ -168,6 +191,36 @@ if ($result->isSuccess()) {
     $qrCode = $result->getQrCode();
 }
 ```
+
+### Buyer Identification Schemes
+
+For the `registration_scheme` field, ZATCA accepts:
+
+| Scheme ID | Description |
+|-----------|-------------|
+| `CRN` | Commercial Registration Number |
+| `MOM` | Momra License |
+| `MLS` | MLSD License |
+| `SAG` | Sagia License |
+| `NAT` | National ID (10 digits) |
+| `GCC` | GCC ID |
+| `IQA` | Iqama Number |
+| `TIN` | Tax Identification Number (VAT) |
+| `700` | 700 Number |
+| `OTH` | Other ID |
+
+### Required Buyer Address Fields for Saudi Arabia (BR-KSA-63)
+
+When the buyer's country is `SA`, these fields are **mandatory**:
+
+| Field | XML Element | Description |
+|-------|-------------|-------------|
+| `street` | `cbc:StreetName` | Street name (BT-50) |
+| `building` | `cbc:BuildingNumber` | Building number - 4 digits (KSA-18) |
+| `postal_code` | `cbc:PostalZone` | Postal code - 5 digits (BT-53) |
+| `city` | `cbc:CityName` | City name (BT-52) |
+| `district` | `cbc:CitySubdivisionName` | District name (KSA-4) |
+| `country` | `cbc:IdentificationCode` | Country code (BT-55) |
 
 ### Creating Credit/Debit Notes
 
@@ -260,6 +313,11 @@ $isExpiringSoon = $cert->isExpiringSoon(30);
 
 // Get certificates expiring soon
 $expiring = Zatca::certificate()->getExpiringSoon(30);
+
+// Get certificate issuer (for debugging)
+$issuer = $cert->getFormattedIssuer();
+// Should be: CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local (simulation)
+// NOT: CN=eInvoicing (mock/sandbox)
 ```
 
 ### Manual XML Generation
@@ -325,125 +383,20 @@ The package dispatches events you can listen to:
 - `InvoiceRejected` - When an invoice is rejected by ZATCA
 - `CertificateExpiring` - When a certificate is about to expire
 
-## Testing
+## Debugging
 
-The package includes a sandbox mode for testing:
+Enable debug mode to save XML files and hashes for inspection:
 
-```php
-// In your .env
-ZATCA_ENVIRONMENT=sandbox
+```env
+ZATCA_DEBUG_ENABLED=true
+ZATCA_DEBUG_PATH=zatca/debug
 ```
 
-Run the test suite:
-
-```bash
-./vendor/bin/pest tests/Feature/ZatcaPackageTest.php
-```
-
-## Test Coverage Summary - 66 Tests, 156 Assertions
-
-The package includes comprehensive tests covering all ZATCA e-invoicing functionality:
-
-### CSR Generator (5 tests)
-- Valid CSR generation with private/public keys
-- B2C-only invoice type configuration
-- B2B-only invoice type configuration
-- VAT number format validation (15 digits)
-- VAT number must start and end with 3
-
-### Invoice Builder - Simplified B2C (4 tests)
-- Create simplified invoice with standard VAT calculation
-- Multiple line items with totals
-- No buyer required for B2C
-- Optional buyer allowed
-
-### Invoice Builder - Standard B2B (3 tests)
-- Create standard invoice with buyer
-- Buyer required validation
-- Buyer VAT number validation
-
-### Invoice Builder - Credit Notes (3 tests)
-- Simplified credit note with reference
-- Standard credit note
-- Original invoice reference required
-
-### Invoice Builder - Debit Notes (3 tests)
-- Simplified debit note
-- Standard debit note
-- Original invoice reference required
-
-### Line Item - VAT Categories (4 tests)
-- Standard VAT (15%)
-- Zero-rated VAT (0%)
-- Exempt VAT
-- Out-of-scope VAT
-
-### Line Item - Discounts (3 tests)
-- Discount calculation
-- Invoice total with discounts
-- Zero discount handling
-
-### Payment Methods (3 tests)
-- Cash payment
-- Bank transfer with payment terms
-- Bank card payment
-
-### Multi-Currency Support (3 tests)
-- Default SAR currency
-- USD support
-- EUR support
-
-### TLV Encoder (3 tests)
-- Encode/decode TLV data
-- Arabic text encoding
-- All 9 Phase 2 QR tags
-
-### QR Generator (2 tests)
-- Phase 1 QR code generation
-- QR code decoding and verification
-
-### UBL Generator (6 tests)
-- Valid UBL XML generation
-- Correct invoice type codes
-- Credit note type code (381)
-- Seller information in XML
-- Buyer information for B2B
-- Line items in XML
-
-### XML Validator (4 tests)
-- Well-formed XML validation
-- Malformed XML rejection
-- XML with namespaces
-- UBL invoice structure
-
-### XML Signer (2 tests)
-- Invoice hash generation
-- Consistent hash for same invoice
-
-### Hash Chain Manager (4 tests)
-- Initial hash for first invoice
-- Unique UUID generation
-- UUID format validation
-- Hash chain continuity
-
-### Invoice Validation (7 tests)
-- Invoice number required
-- Seller information required
-- Seller VAT number required
-- At least one line item required
-- Line item name required
-- Positive quantity required
-- Non-negative unit price required
-
-### Full Invoice Workflow (3 tests)
-- Complete simplified invoice flow: build -> XML -> hash -> QR
-- Complete standard invoice flow with buyer
-- Invoice chain with incrementing ICV
-
-### Additional Features (3 tests)
-- Invoice notes
-- Supply date different from issue date
-- UUID auto-generation and custom UUID
+Debug files are saved to `storage/app/{ZATCA_DEBUG_PATH}/`:
+- `{invoice}_unsigned.xml` - XML before signing
+- `{invoice}_signed.xml` - XML after signing
+- `{invoice}_hash.txt` - Invoice hash
+- `{invoice}_qr.txt` - QR code data
 
 ## Error Handling
 
@@ -466,6 +419,42 @@ try {
 }
 ```
 
+## Common ZATCA Validation Errors
+
+| Error Code | Message | Solution |
+|------------|---------|----------|
+| `X509IssuerName` | wrong X509IssuerName | Use `simulation` or `production` environment to get real certificates |
+| `X509SerialNumber` | wrong X509SerialNumber | Certificate not from ZATCA - regenerate with real OTP |
+| `BR-KSA-F-13` | Invalid Seller/Buyer ID | Provide valid `registration_number` with correct `registration_scheme` |
+| `BR-KSA-63` | Missing address fields | Include all required fields: street, building, postal_code, city, district |
+| `BR-CL-KSA-14` | QR Code exceeds 1000 chars | Reduce invoice data or check QR generation |
+
+## Changelog
+
+### v1.1.0 (2024-12-13)
+
+#### Fixed
+- **X509IssuerName format**: Now correctly uses RFC 4514 format with `, ` (comma + space) separators matching ZATCA SDK
+- **X509SerialNumber**: Properly extracted from certificate
+- **SignedProperties hash**: XML whitespace now matches Python SDK's exact format for correct hash computation
+- **Buyer PartyIdentification**: Now always includes `<cac:PartyIdentification>` element with proper schemeID
+- **Buyer postal address**: Now includes all required SA address fields (BuildingNumber, District, etc.)
+
+#### Changed
+- `Certificate::getFormattedIssuer()` no longer reverses DN order
+- `XmlSigner::formatIssuerDN()` preserves `, ` separators
+- `XmlSigner::computeSignedPropertiesHashSdkStyle()` uses exact SDK whitespace
+- `XmlSigner::buildSignatureXml()` matches SDK indentation structure
+- `UblGenerator::addCustomerParty()` always adds buyer ID, uses VAT as TIN fallback
+
+#### Added
+- Support for flat buyer data with all SA-required address fields
+- Automatic schemeID detection (TIN for VAT numbers, NAT for national IDs, CRN for registration numbers)
+
+### v1.0.0 (2024-12-12)
+
+- Initial release with full Phase 2 support
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for more information.
@@ -473,6 +462,8 @@ MIT License. See [LICENSE](LICENSE) for more information.
 ## Resources
 
 - [ZATCA E-Invoicing Portal](https://zatca.gov.sa/en/E-Invoicing/Pages/default.aspx)
+- [ZATCA Simulation Portal](https://fatoora.zatca.gov.sa/)
+- [ZATCA XML Validator](https://sandbox.zatca.gov.sa/Compliance)
 - [Developer Portal Manual](https://zatca.gov.sa/en/E-Invoicing/Introduction/Guidelines/Documents/DEVELOPER-PORTAL-MANUAL.pdf)
 - [XML Implementation Standard](https://zatca.gov.sa/ar/E-Invoicing/SystemsDevelopers/Documents/20230519_ZATCA_Electronic_Invoice_XML_Implementation_Standard_%20vF.pdf)
 - [ZATCA SDK](https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx)

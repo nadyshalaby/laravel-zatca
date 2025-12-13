@@ -7,9 +7,7 @@ use Corecave\Zatca\Contracts\CertificateInterface;
 use Corecave\Zatca\Enums\Environment;
 use Corecave\Zatca\Exceptions\ApiException;
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use Psr\Http\Message\RequestInterface;
@@ -232,17 +230,13 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Encode CSR for API submission.
+     *
+     * ZATCA requires the full PEM-formatted CSR to be base64 encoded,
+     * including the BEGIN/END headers.
      */
     protected function encodeCsr(string $csr): string
     {
-        // Remove PEM headers and encode to base64
-        $csrContent = str_replace(
-            ['-----BEGIN CERTIFICATE REQUEST-----', '-----END CERTIFICATE REQUEST-----', "\n", "\r"],
-            '',
-            $csr
-        );
-
-        return trim($csrContent);
+        return base64_encode($csr);
     }
 
     /**
@@ -269,13 +263,10 @@ class ZatcaClient implements ApiClientInterface
         switch ($statusCode) {
             case 400:
                 throw ApiException::fromResponse($response, $body);
-
             case 401:
                 throw ApiException::authenticationFailed();
-
             case 429:
                 throw ApiException::rateLimited();
-
             default:
                 throw ApiException::fromResponse($response, $body);
         }

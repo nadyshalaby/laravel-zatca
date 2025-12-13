@@ -27,13 +27,38 @@ class TlvEncoder
 
     /**
      * Encode a single TLV tag.
+     *
+     * ZATCA TLV encoding uses ASN.1 BER length encoding:
+     * - Length < 128: single byte
+     * - Length >= 128: first byte = 0x80 | num_length_bytes, followed by length bytes
      */
     public function encodeTag(int $tag, string $value): string
     {
         $valueBytes = $value;
         $length = strlen($valueBytes);
 
-        return chr($tag).chr($length).$valueBytes;
+        return chr($tag).$this->encodeLength($length).$valueBytes;
+    }
+
+    /**
+     * Encode length using ASN.1 BER encoding.
+     */
+    protected function encodeLength(int $length): string
+    {
+        if ($length < 128) {
+            return chr($length);
+        }
+
+        // For lengths >= 128, use multi-byte encoding
+        $lengthBytes = '';
+        $tempLength = $length;
+
+        while ($tempLength > 0) {
+            $lengthBytes = chr($tempLength & 0xFF).$lengthBytes;
+            $tempLength >>= 8;
+        }
+
+        return chr(0x80 | strlen($lengthBytes)).$lengthBytes;
     }
 
     /**
@@ -46,17 +71,47 @@ class TlvEncoder
         $tlv = base64_decode($tlvBase64);
         $tags = [];
         $offset = 0;
+        $tlvLength = strlen($tlv);
 
-        while ($offset < strlen($tlv)) {
+        while ($offset < $tlvLength) {
             $tag = ord($tlv[$offset]);
-            $length = ord($tlv[$offset + 1]);
-            $value = substr($tlv, $offset + 2, $length);
+            $offset++;
 
+            // Decode length (ASN.1 BER encoding)
+            [$length, $bytesRead] = $this->decodeLength($tlv, $offset);
+            $offset += $bytesRead;
+
+            $value = substr($tlv, $offset, $length);
             $tags[$tag] = $value;
-            $offset += 2 + $length;
+            $offset += $length;
         }
 
         return $tags;
+    }
+
+    /**
+     * Decode ASN.1 BER length.
+     *
+     * @return array{0: int, 1: int} [length, bytes_read]
+     */
+    protected function decodeLength(string $data, int $offset): array
+    {
+        $firstByte = ord($data[$offset]);
+
+        if ($firstByte < 128) {
+            // Short form: single byte length
+            return [$firstByte, 1];
+        }
+
+        // Long form: first byte indicates number of length bytes
+        $numLengthBytes = $firstByte & 0x7F;
+        $length = 0;
+
+        for ($i = 0; $i < $numLengthBytes; $i++) {
+            $length = ($length << 8) | ord($data[$offset + 1 + $i]);
+        }
+
+        return [$length, 1 + $numLengthBytes];
     }
 
     /**
@@ -86,10 +141,10 @@ class TlvEncoder
             3 => 'Timestamp',
             4 => 'Total with VAT',
             5 => 'VAT Amount',
-            6 => 'Invoice Hash',
-            7 => 'ECDSA Signature',
+            6 => 'Invoice Hash (DigestValue)',
+            7 => 'Digital Signature (SignatureValue)',
             8 => 'ECDSA Public Key',
-            9 => 'ZATCA Signature',
+            9 => 'Certificate Signature',
         ];
 
         $result = [];

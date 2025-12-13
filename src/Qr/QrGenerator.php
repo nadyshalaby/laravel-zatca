@@ -21,17 +21,24 @@ class QrGenerator
     /**
      * Generate QR code content for an invoice.
      *
+     * ZATCA Phase 2 TLV tags (per ZATCA official spec):
+     * - Tags 1-5: Text values (seller, VAT, timestamp, amounts)
+     * - Tag 6: Invoice Hash (base64 encoded DigestValue from signature)
+     * - Tag 7: Digital Signature Value (base64 encoded SignatureValue)
+     * - Tag 8: ECDSA Public Key (SPKI DER format bytes)
+     * - Tag 9: Certificate Signature (raw signature from X.509 certificate)
+     *
      * @param  InvoiceInterface  $invoice  The invoice
-     * @param  string  $signature  ECDSA signature (base64)
-     * @param  string  $publicKey  Public key bytes
-     * @param  string|null  $zatcaSignature  ZATCA certificate signature (for simplified invoices)
+     * @param  string  $signatureValue  Base64 encoded SignatureValue from XML signature
+     * @param  string  $publicKey  Public key - raw SPKI DER bytes
+     * @param  string  $certificateSignature  Raw certificate signature bytes (from X.509 cert)
      * @return string Base64 encoded TLV data
      */
     public function generate(
         InvoiceInterface $invoice,
-        string $signature,
+        string $signatureValue,
         string $publicKey,
-        ?string $zatcaSignature = null
+        string $certificateSignature
     ): string {
         $tags = [
             1 => $this->getSellerName($invoice),
@@ -39,15 +46,11 @@ class QrGenerator
             3 => $this->formatTimestamp($invoice->getIssueDate()),
             4 => $this->formatAmount($invoice->getTotalWithVat()),
             5 => $this->formatAmount($invoice->getTotalVat()),
-            6 => $this->getInvoiceHash($invoice),
-            7 => $this->decodeSignature($signature),
-            8 => $this->formatPublicKey($publicKey),
+            6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
+            7 => $signatureValue,                                 // base64 SignatureValue string
+            8 => $this->formatPublicKey($publicKey),             // SPKI DER bytes
+            9 => $certificateSignature,                          // Raw cert signature bytes
         ];
-
-        // Tag 9 is only for simplified invoices
-        if ($invoice->isSimplified() && $zatcaSignature !== null) {
-            $tags[9] = $this->decodeSignature($zatcaSignature);
-        }
 
         return $this->encoder->encode($tags);
     }
@@ -95,7 +98,10 @@ class QrGenerator
     }
 
     /**
-     * Get invoice hash (decoded from base64).
+     * Get invoice hash for QR code Tag 6.
+     *
+     * Per trusted package: Tag 6 receives the base64 encoded hash,
+     * NOT raw bytes. The hash is stored as base64 on the invoice.
      */
     protected function getInvoiceHash(InvoiceInterface $invoice): string
     {
@@ -105,36 +111,31 @@ class QrGenerator
             return '';
         }
 
-        // Hash should be raw bytes, not base64
-        return base64_decode($hash);
-    }
-
-    /**
-     * Decode base64 signature to raw bytes.
-     */
-    protected function decodeSignature(string $signature): string
-    {
-        return base64_decode($signature);
+        // Return base64 encoded hash as-is (NOT decoded to raw bytes!)
+        return $hash;
     }
 
     /**
      * Format public key for QR code.
+     *
+     * ZATCA expects the SPKI (SubjectPublicKeyInfo) DER-encoded public key.
+     * The input should already be raw DER bytes from Certificate::getPublicKeyRaw().
      */
     protected function formatPublicKey(string $publicKey): string
     {
-        // If already raw bytes, return as is
-        if (! str_contains($publicKey, '-----BEGIN')) {
-            return $publicKey;
+        // If it's a PEM formatted key, extract the DER
+        if (str_contains($publicKey, '-----BEGIN')) {
+            $publicKey = str_replace(
+                ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
+                '',
+                $publicKey
+            );
+
+            return base64_decode($publicKey);
         }
 
-        // Extract raw key from PEM
-        $publicKey = str_replace(
-            ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
-            '',
-            $publicKey
-        );
-
-        return base64_decode($publicKey);
+        // Already raw DER bytes
+        return $publicKey;
     }
 
     /**
