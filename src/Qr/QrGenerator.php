@@ -21,12 +21,16 @@ class QrGenerator
     /**
      * Generate QR code content for an invoice.
      *
-     * ZATCA Phase 2 TLV tags (per ZATCA official spec):
-     * - Tags 1-5: Text values (seller, VAT, timestamp, amounts)
-     * - Tag 6: Invoice Hash (base64 encoded DigestValue from signature)
-     * - Tag 7: Digital Signature Value (base64 encoded SignatureValue)
-     * - Tag 8: ECDSA Public Key (SPKI DER format bytes)
-     * - Tag 9: Certificate Signature (raw signature from X.509 certificate)
+     * ZATCA Phase 2 TLV tags (per ZATCA SDK reference):
+     * - Tags 1-5: Text values (seller, VAT, timestamp, amounts) as UTF-8 strings
+     * - Tag 6: Invoice Hash - base64 encoded string (DigestValue from XML signature)
+     * - Tag 7: Digital Signature Value - base64 encoded string (SignatureValue from XML)
+     * - Tag 8: ECDSA Public Key - raw SPKI DER bytes
+     * - Tag 9: Certificate Signature - raw signature bytes from X.509 certificate
+     *
+     * NOTE: Per ZATCA SDK reference implementation, tags 6 and 7 are stored as
+     * base64 STRINGS (encoded to UTF-8 bytes in TLV), while tags 8 and 9 are
+     * raw binary bytes.
      *
      * @param  InvoiceInterface  $invoice  The invoice
      * @param  string  $signatureValue  Base64 encoded SignatureValue from XML signature
@@ -46,8 +50,8 @@ class QrGenerator
             3 => $this->formatTimestamp($invoice->getIssueDate()),
             4 => $this->formatAmount($invoice->getTotalWithVat()),
             5 => $this->formatAmount($invoice->getTotalVat()),
-            6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
-            7 => $signatureValue,                                 // base64 SignatureValue string
+            6 => $this->getInvoiceHash($invoice),                // base64 string (DigestValue)
+            7 => $signatureValue,                                 // base64 string (SignatureValue)
             8 => $this->formatPublicKey($publicKey),             // SPKI DER bytes
             9 => $certificateSignature,                          // Raw cert signature bytes
         ];
@@ -98,10 +102,29 @@ class QrGenerator
     }
 
     /**
+     * Get invoice hash for QR code Tag 6 as raw bytes.
+     *
+     * ZATCA Phase 2 requires Tag 6 to contain the raw SHA-256 hash bytes,
+     * NOT the base64-encoded string. The invoice stores the hash as base64,
+     * so we decode it to get the raw 32-byte hash.
+     */
+    protected function getInvoiceHashRaw(InvoiceInterface $invoice): string
+    {
+        $hash = $invoice->getHash();
+
+        if ($hash === null) {
+            return '';
+        }
+
+        // Decode from base64 to get raw SHA-256 bytes (32 bytes)
+        return base64_decode($hash);
+    }
+
+    /**
      * Get invoice hash for QR code Tag 6.
      *
-     * Per trusted package: Tag 6 receives the base64 encoded hash,
-     * NOT raw bytes. The hash is stored as base64 on the invoice.
+     * Returns the base64 encoded hash string as stored in the invoice.
+     * Per ZATCA SDK reference, tag 6 contains the base64 string (not raw bytes).
      */
     protected function getInvoiceHash(InvoiceInterface $invoice): string
     {
@@ -111,7 +134,6 @@ class QrGenerator
             return '';
         }
 
-        // Return base64 encoded hash as-is (NOT decoded to raw bytes!)
         return $hash;
     }
 

@@ -5,6 +5,8 @@ namespace Corecave\Zatca;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Certificate\CsrGenerator;
 use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Commands\CleanupCommand;
+use Corecave\Zatca\Commands\ComplianceCheckCommand;
 use Corecave\Zatca\Commands\ComplianceCommand;
 use Corecave\Zatca\Commands\GenerateCsrCommand;
 use Corecave\Zatca\Commands\ProductionCsidCommand;
@@ -113,8 +115,10 @@ class ZatcaServiceProvider extends ServiceProvider
             $this->commands([
                 GenerateCsrCommand::class,
                 ComplianceCommand::class,
+                ComplianceCheckCommand::class,
                 ProductionCsidCommand::class,
                 RenewCsidCommand::class,
+                CleanupCommand::class,
             ]);
         }
     }

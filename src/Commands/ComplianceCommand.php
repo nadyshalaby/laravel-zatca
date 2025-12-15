@@ -8,6 +8,7 @@ use Corecave\Zatca\Certificate\CsrGenerator;
 use Corecave\Zatca\Client\ZatcaClient;
 use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
+use Corecave\Zatca\Qr\QrGenerator;
 use Corecave\Zatca\Xml\UblGenerator;
 use Corecave\Zatca\Xml\XmlSigner;
 use Illuminate\Console\Command;
@@ -36,7 +37,8 @@ class ComplianceCommand extends Command
         CertificateManager $certManager,
         ZatcaClient $client,
         UblGenerator $xmlGenerator,
-        XmlSigner $signer
+        XmlSigner $signer,
+        QrGenerator $qrGenerator
     ): int {
         $this->info('Starting ZATCA Compliance Process...');
         $this->newLine();
@@ -86,6 +88,7 @@ class ComplianceCommand extends Command
                 $client,
                 $xmlGenerator,
                 $signer,
+                $qrGenerator,
                 $complianceCert
             );
 
@@ -164,6 +167,7 @@ class ComplianceCommand extends Command
         ZatcaClient $client,
         UblGenerator $xmlGenerator,
         XmlSigner $signer,
+        QrGenerator $qrGenerator,
         Certificate $certificate
     ): bool {
         $invoiceTypes = config('zatca.csr.invoice_types', '1100');
@@ -206,6 +210,16 @@ class ComplianceCommand extends Command
                     $certificate->getPrivateKey(),
                     $certificate->getCertificatePem()
                 );
+
+                // Generate QR code for simplified (B2C) invoices
+                // QR code is also needed for compliance check invoices
+                $signatureValue = $signer->getSignatureValue($signedXml);
+                $publicKeyDer = $certificate->getPublicKeyRaw();
+                $certificateSignature = $certificate->getCertificateSignature();
+                $qrCode = $qrGenerator->generate($invoice, $signatureValue, $publicKeyDer, $certificateSignature);
+
+                // Add QR code to XML
+                $signedXml = $xmlGenerator->addQrCode($signedXml, $qrCode);
 
                 // Submit for compliance check
                 $response = $client->submitComplianceInvoice(

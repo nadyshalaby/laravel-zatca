@@ -58,11 +58,9 @@ class UblGenerator
         // Add invoice type code
         $this->addInvoiceTypeCode($root, $invoice);
 
-        // Add instruction note for credit/debit notes (KSA-10 reason)
-        // Per UBL 2.1 schema, Note must come AFTER InvoiceTypeCode and BEFORE DocumentCurrencyCode
-        if (($invoice->isCreditNote() || $invoice->isDebitNote()) && $invoice->getInstructionNote()) {
-            $this->addElement($root, 'cbc:Note', $invoice->getInstructionNote());
-        }
+        // Note: BR-KSA-17 reason (KSA-10) for credit/debit notes is added in
+        // PaymentMeans/InstructionNote per ZATCA SDK reference implementation.
+        // cbc:Note at root level is optional and not required for compliance.
 
         // Add document currency
         $this->addElement($root, 'cbc:DocumentCurrencyCode', $invoice->getCurrency());
@@ -561,16 +559,30 @@ class UblGenerator
 
     /**
      * Add payment means.
+     *
+     * For credit notes (381) and debit notes (383), ZATCA BR-KSA-17 requires
+     * cbc:InstructionNote with the reason (KSA-10) for the note issuance.
      */
     protected function addPaymentMeans(DOMElement $parent, InvoiceInterface $invoice): void
     {
         $paymentMeans = $this->createElement('cac:PaymentMeans');
 
-        // Use payment method if provided, otherwise default to cash (10)
-        $paymentCode = $invoice->getPaymentMethod() ?? '10';
+        // Use payment method if provided, otherwise default to bank transfer (30 per ZATCA sample)
+        $paymentCode = $invoice->getPaymentMethod() ?? '30';
         $this->addElement($paymentMeans, 'cbc:PaymentMeansCode', $paymentCode);
 
-        if ($invoice->getPaymentTerms()) {
+        // BR-KSA-17: Credit and debit notes must contain the reason (KSA-10) in InstructionNote
+        if ($invoice->isCreditNote() || $invoice->isDebitNote()) {
+            $reason = $invoice->getInstructionNote();
+            if (empty($reason)) {
+                // Default reason if not provided
+                $reason = $invoice->isCreditNote()
+                    ? 'Cancellation or Returned'
+                    : 'Price adjustment or Additional charges';
+            }
+            $this->addElement($paymentMeans, 'cbc:InstructionNote', $reason);
+        } elseif ($invoice->getPaymentTerms()) {
+            // For regular invoices, use payment terms if provided
             $this->addElement($paymentMeans, 'cbc:InstructionNote', $invoice->getPaymentTerms());
         }
 

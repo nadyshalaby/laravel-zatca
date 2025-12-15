@@ -56,6 +56,8 @@ class ZatcaInvoice extends Model
         'reference_id',
         'total_amount',
         'vat_amount',
+        'invoiceable_type',
+        'invoiceable_id',
     ];
 
     /**
@@ -192,5 +194,30 @@ class ZatcaInvoice extends Model
     public function getValidationWarnings(): array
     {
         return $this->zatca_response['validationResults']['warningMessages'] ?? [];
+    }
+
+    /**
+     * Get the parent invoiceable model (Order or Booking).
+     */
+    public function invoiceable()
+    {
+        return $this->morphTo();
+    }
+
+    /**
+     * Scope for invoices belonging to a specific model type.
+     */
+    public function scopeForModel($query, string $modelClass)
+    {
+        return $query->where('invoiceable_type', $modelClass);
+    }
+
+    /**
+     * Scope for invoices belonging to a specific entity.
+     */
+    public function scopeForEntity($query, $entity)
+    {
+        return $query->where('invoiceable_type', get_class($entity))
+            ->where('invoiceable_id', $entity->id);
     }
 }
