@@ -86,11 +86,18 @@ class QrGenerator
     }
 
     /**
-     * Format timestamp in ISO 8601 format.
+     * Format timestamp for ZATCA QR code.
+     *
+     * ZATCA requires the timestamp to match the XML IssueDate + IssueTime.
+     * Format: YYYY-MM-DDTHH:MM:SS (without timezone suffix).
+     *
+     * Note: The "Z" suffix should NOT be added as it indicates UTC timezone,
+     * but ZATCA expects the timestamp to match exactly with the XML values
+     * which are formatted as date (YYYY-MM-DD) and time (HH:MM:SS) separately.
      */
     protected function formatTimestamp(\DateTimeInterface $date): string
     {
-        return $date->format('Y-m-d\TH:i:s\Z');
+        return $date->format('Y-m-d\TH:i:s');
     }
 
     /**

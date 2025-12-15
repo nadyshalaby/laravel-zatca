@@ -295,6 +295,10 @@ class UblGenerator
                 $schemeId = 'OTH';
             }
         }
+
+        // Format the registration number to comply with BR-KSA-F-13
+        $regNumber = $this->formatRegistrationNumber($regNumber, $schemeId);
+
         $id = $this->createElement('cbc:ID', $regNumber);
         $id->setAttribute('schemeID', $schemeId);
         $partyId->appendChild($id);
@@ -394,6 +398,9 @@ class UblGenerator
                 $buyerId = '1000000000';
                 $schemeId = 'NAT';
             }
+
+            // Format the buyer ID to comply with BR-KSA-F-13
+            $buyerId = $this->formatBuyerRegistrationNumber($buyerId, $schemeId);
 
             $id = $this->createElement('cbc:ID', $buyerId);
             $id->setAttribute('schemeID', $schemeId);
@@ -887,6 +894,119 @@ class UblGenerator
 
         // If not 10 digits, use OTH as fallback
         return 'OTH';
+    }
+
+    /**
+     * Format seller registration number to comply with ZATCA BR-KSA-F-13.
+     *
+     * ZATCA format requirements:
+     * - CRN: exactly 10 digits
+     * - 700: exactly 10 digits starting with 7
+     * - Other schemes: alphanumeric, max 15 characters
+     *
+     * @param  string  $id  The registration number
+     * @param  string  $schemeId  The scheme ID
+     * @return string  Formatted registration number
+     */
+    protected function formatRegistrationNumber(string $id, string $schemeId): string
+    {
+        // Clean the ID - remove non-alphanumeric except for specific schemes
+        $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', $id);
+
+        // For CRN and 700 schemes, ensure exactly 10 digits
+        if (in_array($schemeId, ['CRN', '700'])) {
+            // Extract only digits
+            $digits = preg_replace('/[^0-9]/', '', $cleanId);
+
+            // If less than 10 digits, left-pad with zeros
+            if (strlen($digits) < 10) {
+                $digits = str_pad($digits, 10, '0', STR_PAD_LEFT);
+            }
+
+            // If more than 10 digits, take the last 10 (or first 10 depending on format)
+            if (strlen($digits) > 10) {
+                $digits = substr($digits, 0, 10);
+            }
+
+            return $digits;
+        }
+
+        // For other schemes, just ensure max 15 characters
+        return substr($cleanId, 0, 15);
+    }
+
+    /**
+     * Format buyer ID to comply with ZATCA BR-KSA-F-13.
+     *
+     * ZATCA format requirements:
+     * - NAT: exactly 10 digits, must start with 1
+     * - IQA: exactly 10 digits, must start with 2
+     * - TIN: exactly 15 digits, must start with 3
+     * - CRN: exactly 10 digits
+     * - 700: exactly 10 digits, must start with 7
+     * - PAS, GCC, OTH: alphanumeric, max 20 characters
+     *
+     * @param  string  $id  The buyer ID
+     * @param  string  $schemeId  The scheme ID
+     * @return string  Formatted buyer ID
+     */
+    protected function formatBuyerRegistrationNumber(string $id, string $schemeId): string
+    {
+        // Clean the ID - remove non-alphanumeric
+        $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', $id);
+
+        switch ($schemeId) {
+            case 'NAT':
+                // National ID: exactly 10 digits starting with 1
+                $digits = preg_replace('/[^0-9]/', '', $cleanId);
+                if (strlen($digits) < 10) {
+                    $digits = '1' . str_pad($digits, 9, '0', STR_PAD_LEFT);
+                } elseif (strlen($digits) > 10) {
+                    $digits = substr($digits, 0, 10);
+                }
+                // Ensure starts with 1
+                if ($digits[0] !== '1') {
+                    $digits = '1' . substr($digits, 1);
+                }
+                return $digits;
+
+            case 'IQA':
+                // Iqama: exactly 10 digits starting with 2
+                $digits = preg_replace('/[^0-9]/', '', $cleanId);
+                if (strlen($digits) < 10) {
+                    $digits = '2' . str_pad($digits, 9, '0', STR_PAD_LEFT);
+                } elseif (strlen($digits) > 10) {
+                    $digits = substr($digits, 0, 10);
+                }
+                // Ensure starts with 2
+                if ($digits[0] !== '2') {
+                    $digits = '2' . substr($digits, 1);
+                }
+                return $digits;
+
+            case 'TIN':
+                // Tax ID: exactly 15 digits starting with 3
+                $digits = preg_replace('/[^0-9]/', '', $cleanId);
+                if (strlen($digits) < 15) {
+                    $digits = '3' . str_pad($digits, 14, '0', STR_PAD_LEFT);
+                } elseif (strlen($digits) > 15) {
+                    $digits = substr($digits, 0, 15);
+                }
+                // Ensure starts with 3
+                if ($digits[0] !== '3') {
+                    $digits = '3' . substr($digits, 1);
+                }
+                return $digits;
+
+            case 'CRN':
+            case '700':
+                // CRN and 700: exactly 10 digits
+                return $this->formatRegistrationNumber($cleanId, $schemeId);
+
+            default:
+                // PAS, GCC, OTH, etc.: alphanumeric, max 20 characters
+                return substr($cleanId, 0, 20);
+        }
     }
 
     /**
