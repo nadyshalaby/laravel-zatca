@@ -5,7 +5,7 @@ namespace Corecave\Zatca\Commands;
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Certificate\CsrGenerator;
-use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\ApiClientInterface;
 use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Qr\QrGenerator;
@@ -35,7 +35,7 @@ class ComplianceCommand extends Command
     public function handle(
         CsrGenerator $csrGenerator,
         CertificateManager $certManager,
-        ZatcaClient $client,
+        ApiClientInterface $client,
         UblGenerator $xmlGenerator,
         XmlSigner $signer,
         QrGenerator $qrGenerator
@@ -164,7 +164,7 @@ class ComplianceCommand extends Command
      * Run compliance checks by submitting sample invoices.
      */
     protected function runComplianceChecks(
-        ZatcaClient $client,
+        ApiClientInterface $client,
         UblGenerator $xmlGenerator,
         XmlSigner $signer,
         QrGenerator $qrGenerator,
@@ -228,10 +228,20 @@ class ComplianceCommand extends Command
                     $invoice->getUuid()
                 );
 
-                $status = $response['validationResults']['status'] ?? 'UNKNOWN';
+                $status = strtoupper($response['validationResults']['status'] ?? 'UNKNOWN');
+                $reportingStatus = $response['reportingStatus'] ?? null;
+                $clearanceStatus = $response['clearanceStatus'] ?? null;
 
-                if (strtoupper($status) === 'PASS') {
+                // Invoice is accepted if status is PASS/WARNING and it was REPORTED or CLEARED
+                $isAccepted = in_array($status, ['PASS', 'WARNING'])
+                    && ($reportingStatus === 'REPORTED' || $clearanceStatus === 'CLEARED');
+
+                if ($status === 'PASS') {
                     $this->info('    PASS');
+                    $passed++;
+                } elseif ($isAccepted) {
+                    $this->warn("    PASS (with warnings)");
+                    $this->displayValidationWarnings($response);
                     $passed++;
                 } else {
                     $this->error("    FAIL: {$status}");
@@ -313,6 +323,18 @@ class ComplianceCommand extends Command
 
         foreach ($errors as $error) {
             $this->line("      - {$error['message']} ({$error['code']})");
+        }
+    }
+
+    /**
+     * Display validation warnings from response.
+     */
+    protected function displayValidationWarnings(array $response): void
+    {
+        $warnings = $response['validationResults']['warningMessages'] ?? [];
+
+        foreach ($warnings as $warning) {
+            $this->line("      - {$warning['message']} ({$warning['code']})");
         }
     }
 }

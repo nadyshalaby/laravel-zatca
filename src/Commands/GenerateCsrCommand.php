@@ -37,10 +37,14 @@ class GenerateCsrCommand extends Command
         $config = $this->gatherConfig();
 
         // Generate serial number
+        // For sandbox/simulation, use TST format; for production, use organization name
         $uuid = (string) Str::uuid();
+        $environment = config('zatca.environment', 'sandbox');
+        $serialPrefix = in_array($environment, ['sandbox', 'simulation']) ? 'TST' : $config['organization'];
         $serialNumber = sprintf(
-            '1-%s|2-1.0|3-%s',
-            $config['organization'],
+            '1-%s|2-%s|3-%s',
+            $serialPrefix,
+            $serialPrefix,  // Also use TST for the version part in test environments
             $uuid
         );
         $config['serial_number'] = $serialNumber;
@@ -118,6 +122,8 @@ class GenerateCsrCommand extends Command
             'common_name' => $commonName,
             'vat_number' => $vatNumber,
             'invoice_types' => $invoiceTypes,
+            'location' => $config['location'] ?? [],
+            'business_category' => $config['business_category'] ?? 'Technology',
         ];
     }
 

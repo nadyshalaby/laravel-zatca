@@ -4,7 +4,7 @@ namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
-use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\ApiClientInterface;
 use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Qr\QrGenerator;
@@ -38,7 +38,7 @@ class ComplianceCheckCommand extends Command
      */
     public function handle(
         CertificateManager $certManager,
-        ZatcaClient $client,
+        ApiClientInterface $client,
         UblGenerator $xmlGenerator,
         XmlSigner $signer,
         QrGenerator $qrGenerator
@@ -95,7 +95,7 @@ class ComplianceCheckCommand extends Command
      * Run compliance checks by submitting sample invoices.
      */
     protected function runComplianceChecks(
-        ZatcaClient $client,
+        ApiClientInterface $client,
         UblGenerator $xmlGenerator,
         XmlSigner $signer,
         QrGenerator $qrGenerator,

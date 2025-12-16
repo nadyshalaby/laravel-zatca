@@ -5,7 +5,7 @@ namespace Corecave\Zatca\Commands;
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Certificate\CsrGenerator;
-use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\ApiClientInterface;
 use Illuminate\Console\Command;
 
 class RenewCsidCommand extends Command
@@ -28,7 +28,7 @@ class RenewCsidCommand extends Command
     public function handle(
         CertificateManager $certManager,
         CsrGenerator $csrGenerator,
-        ZatcaClient $client
+        ApiClientInterface $client
     ): int {
         $this->info('ZATCA Production CSID Renewal');
         $this->newLine();

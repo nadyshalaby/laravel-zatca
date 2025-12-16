@@ -4,7 +4,7 @@ namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
-use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\ApiClientInterface;
 use Illuminate\Console\Command;
 
 class ProductionCsidCommand extends Command
@@ -23,7 +23,7 @@ class ProductionCsidCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle(CertificateManager $certManager, ZatcaClient $client): int
+    public function handle(CertificateManager $certManager, ApiClientInterface $client): int
     {
         $this->info('Requesting Production CSID...');
         $this->newLine();
@@ -49,6 +49,7 @@ class ProductionCsidCommand extends Command
         $this->newLine();
 
         try {
+            // Use compliance certificate for authentication (as per ZATCA spec)
             $client->setCertificate($complianceCert);
             $response = $client->requestProductionCsid($requestId);
 
