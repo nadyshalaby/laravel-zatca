@@ -220,4 +220,47 @@ class ZatcaInvoice extends Model
         return $query->where('invoiceable_type', get_class($entity))
             ->where('invoiceable_id', $entity->id);
     }
+
+    /**
+     * Get QR code as PNG image (base64 encoded).
+     *
+     * Generates a PNG image from the TLV QR code data using SimpleSoftwareIO/QrCode.
+     */
+    public function getQrCodeImageAttribute(): ?string
+    {
+        if (empty($this->qr_code)) {
+            return null;
+        }
+
+        try {
+            // Generate QR code as base64 PNG using SimpleSoftwareIO/QrCode
+            $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('png')
+                ->size(200)
+                ->margin(1)
+                ->generate($this->qr_code);
+
+            return base64_encode($qrCode);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Get QR code as SVG string.
+     */
+    public function getQrCodeSvgAttribute(): ?string
+    {
+        if (empty($this->qr_code)) {
+            return null;
+        }
+
+        try {
+            return \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')
+                ->size(200)
+                ->margin(1)
+                ->generate($this->qr_code);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 }
