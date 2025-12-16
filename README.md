@@ -6,7 +6,8 @@ This package supports Phase 2 requirements including:
 - CSR generation and certificate management
 - Invoice XML generation (UBL 2.1 compliant)
 - Digital signing with ECDSA (secp256k1)
-- QR code generation (9 TLV tags)
+- QR code generation (TLV format with 9 tags)
+- QR code image generation (PNG/SVG) for invoices
 - Invoice reporting (B2C simplified invoices)
 - Invoice clearance (B2B standard invoices)
 - Credit and debit note handling
@@ -18,6 +19,7 @@ This package supports Phase 2 requirements including:
 - Laravel 10.x, 11.x, or 12.x
 - OpenSSL extension
 - GMP extension (recommended for better performance)
+- `simplesoftwareio/simple-qrcode` (optional, for QR code image generation)
 
 ## Installation
 
@@ -35,6 +37,14 @@ Run the migrations:
 
 ```bash
 php artisan migrate
+```
+
+### Optional: QR Code Image Generation
+
+To generate QR code images (PNG/SVG) for embedding in emails or PDFs:
+
+```bash
+composer require simplesoftwareio/simple-qrcode
 ```
 
 ## Configuration
@@ -102,6 +112,11 @@ php artisan zatca:generate-csr --save
 php artisan zatca:compliance --otp=123456
 ```
 
+This command will:
+- Request a compliance CSID from ZATCA
+- Run compliance checks with sample invoices (simplified & standard)
+- Display pass/fail status for each check
+
 ### Step 3: Get Production CSID
 
 After passing compliance checks:
@@ -141,7 +156,7 @@ $invoice = InvoiceBuilder::simplified()
 $result = Zatca::report($invoice);
 
 if ($result->isSuccess()) {
-    $qrCode = $result->getQrCode();
+    $qrCode = $result->getQrCode();      // TLV base64 string
     $signedXml = $result->getSignedXml();
 
     // Store or display the QR code
@@ -296,6 +311,34 @@ use Corecave\Zatca\Enums\VatExemptionReason;
 ])
 ```
 
+### QR Code Image Generation
+
+The `ZatcaInvoice` model provides methods to generate QR code images for embedding in emails, PDFs, or displaying on screen.
+
+```php
+use Corecave\Zatca\Models\ZatcaInvoice;
+
+$invoice = ZatcaInvoice::find($id);
+
+// Get QR code as base64-encoded PNG image
+$pngBase64 = $invoice->qr_code_image;
+
+// Use in HTML
+echo '<img src="data:image/png;base64,' . $pngBase64 . '" alt="QR Code">';
+
+// Get QR code as SVG string
+$svg = $invoice->qr_code_svg;
+
+// Use SVG directly in HTML
+echo $svg;
+```
+
+**Note:** QR code image generation requires the `simplesoftwareio/simple-qrcode` package:
+
+```bash
+composer require simplesoftwareio/simple-qrcode
+```
+
 ### Working with Certificates
 
 ```php
@@ -364,14 +407,17 @@ $stats = $hashManager->getStatistics();
 # Generate CSR for onboarding
 php artisan zatca:generate-csr --save
 
-# Run compliance process
+# Run compliance process (requests CSID + runs compliance checks)
 php artisan zatca:compliance --otp=123456
 
-# Request production CSID
+# Request production CSID (after compliance passes)
 php artisan zatca:production-csid
 
 # Renew expiring certificate
 php artisan zatca:renew-csid --otp=123456
+
+# Clean up old/orphaned certificates
+php artisan zatca:cleanup-certificates --days=90
 ```
 
 ## Events
@@ -431,6 +477,12 @@ try {
 
 ## Changelog
 
+### v1.2.0 (2024-12-16)
+
+#### Added
+- **QR Code Image Generation**: New `qr_code_image` and `qr_code_svg` attributes on `ZatcaInvoice` model for generating QR code images (PNG/SVG) suitable for embedding in emails and PDFs
+- Optional dependency on `simplesoftwareio/simple-qrcode` for QR code image generation
+
 ### v1.1.0 (2024-12-13)
 
 #### Fixed
@@ -450,6 +502,8 @@ try {
 #### Added
 - Support for flat buyer data with all SA-required address fields
 - Automatic schemeID detection (TIN for VAT numbers, NAT for national IDs, CRN for registration numbers)
+- Compliance check command with automatic sample invoice generation
+- Certificate cleanup command for removing old/orphaned certificates
 
 ### v1.0.0 (2024-12-12)
 
