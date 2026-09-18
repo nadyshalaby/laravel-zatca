@@ -32,10 +32,10 @@ Publish the configuration file:
 php artisan vendor:publish --tag=zatca-config
 ```
 
-Run the migrations:
+The package ships no migrations. Each workshop keeps its own certificates, invoice counter and hash chain in its own schema, so the host app keeps the two table migrations with its workshop migrations (`database/migrations/tenant` in Syanat) and runs them per workshop:
 
 ```bash
-php artisan migrate
+php artisan tenants:migrate
 ```
 
 ## Configuration
@@ -418,7 +418,8 @@ try {
     $zatcaErrors = $e->getZatcaErrors();
     $zatcaWarnings = $e->getZatcaWarnings();
 } catch (CertificateException $e) {
-    // Certificate issue
+    // Certificate issue: renew the CSID with `php artisan zatca:renew-csid`, then retry
+    $certificateError = $e->getMessage();
 }
 ```
 

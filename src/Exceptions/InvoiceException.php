@@ -67,4 +67,20 @@ class InvoiceException extends ZatcaException
     {
         return new static('Invoice hash chain verification failed. Previous invoice hash mismatch.');
     }
+
+    /**
+     * Hash chain lock asked for outside a transaction, where it would be released at once.
+     */
+    public static function hashChainLockOutsideTransaction(): static
+    {
+        return new static('The invoice hash chain lock must be taken inside a database transaction.');
+    }
+
+    /**
+     * Hash chain lock asked for on a connection with no current schema, so there is nothing to key it on.
+     */
+    public static function hashChainLockWithoutSchema(): static
+    {
+        return new static('The invoice hash chain lock needs a current database schema, and the connection has none.');
+    }
 }

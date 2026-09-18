@@ -15,6 +15,8 @@ class HashChainManager
      */
     private const INITIAL_HASH = 'NWZlY2ViNjZmZmMzNmY3Y2QzOTAzNmQ5MmUyOWZjNjBlOTA4ODNlMTNkNjUwNWQ2Njc0N2ZhZDc2YzM4OWQ1MA==';
 
+    public function __construct(private readonly HashChainLock $lock = new HashChainLock) {}
+
     /**
      * Get the next Invoice Counter Value (ICV).
      * This must be atomic and sequential.
@@ -27,8 +29,8 @@ class HashChainManager
             $driver = DB::connection()->getDriverName();
 
             if ($driver === 'pgsql') {
-                // Use advisory lock for PostgreSQL
-                DB::select('SELECT pg_advisory_xact_lock(1)');
+                // One advisory lock per workshop schema, so workshops never wait for each other
+                $this->lock->acquire(DB::connection());
             }
 
             $maxIcv = ZatcaInvoice::max('icv');

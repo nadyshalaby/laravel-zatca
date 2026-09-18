@@ -103,12 +103,6 @@ class ZatcaServiceProvider extends ServiceProvider
             __DIR__.'/../config/zatca.php' => config_path('zatca.php'),
         ], 'zatca-config');
 
-        $this->publishes([
-            __DIR__.'/../database/migrations' => database_path('migrations'),
-        ], 'zatca-migrations');
-
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-
         if ($this->app->runningInConsole()) {
             $this->commands([
                 GenerateCsrCommand::class,
