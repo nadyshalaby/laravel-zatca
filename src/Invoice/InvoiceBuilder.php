@@ -15,8 +15,6 @@ class InvoiceBuilder
 {
     protected array $sellerConfig;
 
-    protected array $invoiceConfig;
-
     protected ?string $uuid = null;
 
     protected ?string $invoiceNumber = null;
@@ -60,7 +58,6 @@ class InvoiceBuilder
     public function __construct(array $sellerConfig = [], array $invoiceConfig = [])
     {
         $this->sellerConfig = $sellerConfig;
-        $this->invoiceConfig = $invoiceConfig;
         $this->currency = $invoiceConfig['currency'] ?? 'SAR';
     }
 

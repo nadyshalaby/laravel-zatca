@@ -12,8 +12,6 @@ class CertificateManager
 {
     protected array $config;
 
-    protected ?CertificateInterface $cachedCertificate = null;
-
     public function __construct(array $config = [])
     {
         $this->config = $config;

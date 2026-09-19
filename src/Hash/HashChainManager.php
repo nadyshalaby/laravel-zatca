@@ -9,12 +9,6 @@ use Illuminate\Support\Str;
 
 class HashChainManager
 {
-    /**
-     * The initial hash value for the first invoice.
-     * This is base64 of SHA-256 hash of "0".
-     */
-    private const INITIAL_HASH = 'NWZlY2ViNjZmZmMzNmY3Y2QzOTAzNmQ5MmUyOWZjNjBlOTA4ODNlMTNkNjUwNWQ2Njc0N2ZhZDc2YzM4OWQ1MA==';
-
     public function __construct(private readonly HashChainLock $lock = new HashChainLock) {}
 
     /**

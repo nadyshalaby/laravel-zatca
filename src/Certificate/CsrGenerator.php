@@ -14,19 +14,6 @@ class CsrGenerator
      */
     private const ZATCA_TEMPLATE_NAME = 'ZATCA-Code-Signing';
 
-    /**
-     * ZATCA-specific OIDs for Subject Alternative Name extensions.
-     */
-    private const OID_SN = '2.5.4.4';                    // Serial Number
-
-    private const OID_UID = '0.9.2342.19200300.100.1.1'; // User ID (VAT Number)
-
-    private const OID_TITLE = '2.5.4.12';                // Title (Invoice Types)
-
-    private const OID_REGISTERED_ADDRESS = '2.5.4.26';   // Registered Address
-
-    private const OID_BUSINESS_CATEGORY = '2.5.4.15';    // Business Category
-
     public function __construct(array $config = [])
     {
         $this->config = $config;

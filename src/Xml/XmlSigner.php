@@ -17,20 +17,6 @@ class XmlSigner
      */
     private const NS_DS = 'http://www.w3.org/2000/09/xmldsig#';
 
-    private const NS_XADES = 'http://uri.etsi.org/01903/v1.3.2#';
-
-    private const NS_EXT = 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2';
-
-    private const NS_SIG = 'urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2';
-
-    private const NS_SAC = 'urn:oasis:names:specification:ubl:schema:xsd:SignatureAggregateComponents-2';
-
-    private const NS_SBC = 'urn:oasis:names:specification:ubl:schema:xsd:SignatureBasicComponents-2';
-
-    private const NS_CBC = 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2';
-
-    private const NS_CAC = 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2';
-
     /**
      * Sign an XML invoice using ECDSA with SHA-256.
      *
