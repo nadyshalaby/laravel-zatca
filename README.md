@@ -452,6 +452,10 @@ Every method now takes at most three parameters, so the long parameter lists mov
 - `ZatcaException` has no constructor of its own: build one with context through `ZatcaException::withContext($message, $context)`. `ApiException`'s constructor no longer takes the ZATCA errors and warnings; `ApiException::fromResponse()` reads them from the response.
 - `UblGenerator` writes the parties, totals and lines through `UblPartyWriter`, `UblTotalsWriter` and `UblLineWriter`; its public methods are unchanged.
 
+#### Added
+
+- `InvoiceBuilder::fromConfig()` builds an `InvoiceBuilder` from the `zatca.seller` and `zatca.invoice` config, which the service provider and the builder's own static constructors used to read separately.
+
 ### v1.1.0 (2024-12-13)
 
 #### Fixed
