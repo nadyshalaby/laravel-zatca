@@ -74,49 +74,31 @@ class HashChainManager
     /**
      * Record an invoice in the hash chain.
      */
-    public function recordInvoice(
-        string $uuid,
-        int $icv,
-        string $invoiceNumber,
-        string $hash,
-        string $previousHash,
-        string $type,
-        string $subType,
-        float $totalAmount,
-        float $vatAmount,
-        ?string $xml = null,
-        ?string $signedXml = null,
-        ?string $qrCode = null,
-        ?string $referenceId = null
-    ): ZatcaInvoice {
+    public function recordInvoice(InvoiceRecord $record): ZatcaInvoice
+    {
         return ZatcaInvoice::create([
-            'uuid' => $uuid,
-            'icv' => $icv,
-            'invoice_number' => $invoiceNumber,
-            'type' => $type,
-            'subtype' => $subType,
-            'hash' => $hash,
-            'previous_hash' => $previousHash,
+            'uuid' => $record->uuid,
+            'icv' => $record->icv,
+            'invoice_number' => $record->invoiceNumber,
+            'type' => $record->type,
+            'subtype' => $record->subType,
+            'hash' => $record->hash,
+            'previous_hash' => $record->previousHash,
             'status' => 'pending',
-            'xml' => $xml,
-            'signed_xml' => $signedXml,
-            'qr_code' => $qrCode,
-            'reference_id' => $referenceId,
-            'total_amount' => $totalAmount,
-            'vat_amount' => $vatAmount,
+            'xml' => $record->xml,
+            'signed_xml' => $record->signedXml,
+            'qr_code' => $record->qrCode,
+            'reference_id' => $record->referenceId,
+            'total_amount' => $record->totalAmount,
+            'vat_amount' => $record->vatAmount,
         ]);
     }
 
     /**
      * Update invoice status after ZATCA response.
      */
-    public function updateInvoiceStatus(
-        string $uuid,
-        string $status,
-        ?array $zatcaResponse = null,
-        ?string $signedXml = null,
-        ?string $qrCode = null
-    ): bool {
+    public function updateInvoiceStatus(string $uuid, string $status, StatusUpdate $update = new StatusUpdate): bool
+    {
         $invoice = ZatcaInvoice::where('uuid', $uuid)->first();
 
         if (! $invoice) {
@@ -125,16 +107,16 @@ class HashChainManager
 
         $invoice->status = $status;
 
-        if ($zatcaResponse !== null) {
-            $invoice->zatca_response = $zatcaResponse;
+        if ($update->zatcaResponse !== null) {
+            $invoice->zatca_response = $update->zatcaResponse;
         }
 
-        if ($signedXml !== null) {
-            $invoice->signed_xml = $signedXml;
+        if ($update->signedXml !== null) {
+            $invoice->signed_xml = $update->signedXml;
         }
 
-        if ($qrCode !== null) {
-            $invoice->qr_code = $qrCode;
+        if ($update->qrCode !== null) {
+            $invoice->qr_code = $update->qrCode;
         }
 
         return $invoice->save();

@@ -28,25 +28,19 @@ class Certificate implements CertificateInterface
     protected array $metadata;
 
     public function __construct(
-        string $type,
-        string $certificate,
-        string $privateKey,
-        string $secret,
-        ?string $requestId = null,
-        ?Carbon $issuedAt = null,
-        ?Carbon $expiresAt = null,
-        bool $active = true,
-        array $metadata = []
+        CertificateOrigin $origin,
+        CertificateCredentials $credentials,
+        CertificateLifetime $lifetime = new CertificateLifetime
     ) {
-        $this->type = $type;
-        $this->certificate = $certificate;
-        $this->privateKey = $privateKey;
-        $this->secret = $secret;
-        $this->requestId = $requestId;
-        $this->issuedAt = $issuedAt;
-        $this->expiresAt = $expiresAt;
-        $this->active = $active;
-        $this->metadata = $metadata;
+        $this->type = $origin->type;
+        $this->certificate = $credentials->certificate;
+        $this->privateKey = $credentials->privateKey;
+        $this->secret = $credentials->secret;
+        $this->requestId = $origin->requestId;
+        $this->issuedAt = $lifetime->issuedAt;
+        $this->expiresAt = $lifetime->expiresAt;
+        $this->active = $lifetime->active;
+        $this->metadata = $origin->metadata;
 
         // If expiry not provided, try to extract from certificate
         if ($this->expiresAt === null) {
@@ -62,18 +56,15 @@ class Certificate implements CertificateInterface
         $certificate = base64_decode($response['binarySecurityToken'] ?? '');
         $secret = $response['secret'] ?? '';
         $requestId = $response['requestID'] ?? null;
+        $metadata = [
+            'disposition_message' => $response['dispositionMessage'] ?? null,
+            'token_type' => $response['tokenType'] ?? null,
+        ];
 
         return new self(
-            type: $type,
-            certificate: $certificate,
-            privateKey: $privateKey,
-            secret: $secret,
-            requestId: $requestId,
-            issuedAt: Carbon::now(),
-            metadata: [
-                'disposition_message' => $response['dispositionMessage'] ?? null,
-                'token_type' => $response['tokenType'] ?? null,
-            ]
+            new CertificateOrigin($type, $requestId, $metadata),
+            new CertificateCredentials($certificate, $privateKey, $secret),
+            new CertificateLifetime(issuedAt: Carbon::now())
         );
     }
 
@@ -83,15 +74,13 @@ class Certificate implements CertificateInterface
     public static function fromArray(array $data): self
     {
         return new self(
-            type: $data['type'],
-            certificate: $data['certificate'],
-            privateKey: $data['private_key'],
-            secret: $data['secret'],
-            requestId: $data['request_id'] ?? null,
-            issuedAt: isset($data['issued_at']) ? Carbon::parse($data['issued_at']) : null,
-            expiresAt: isset($data['expires_at']) ? Carbon::parse($data['expires_at']) : null,
-            active: $data['is_active'] ?? true,
-            metadata: $data['metadata'] ?? []
+            new CertificateOrigin($data['type'], $data['request_id'] ?? null, $data['metadata'] ?? []),
+            new CertificateCredentials($data['certificate'], $data['private_key'], $data['secret']),
+            new CertificateLifetime(
+                isset($data['issued_at']) ? Carbon::parse($data['issued_at']) : null,
+                isset($data['expires_at']) ? Carbon::parse($data['expires_at']) : null,
+                $data['is_active'] ?? true
+            )
         );
     }
 

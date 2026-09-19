@@ -14,16 +14,12 @@ class ClearanceResult
 
     protected array $response;
 
-    public function __construct(
-        InvoiceInterface $invoice,
-        string $clearedXml,
-        ?string $qrCode,
-        array $response
-    ) {
-        $this->invoice = $invoice;
+    public function __construct(Submission $submission, string $clearedXml, ?string $qrCode)
+    {
+        $this->invoice = $submission->invoice;
         $this->clearedXml = $clearedXml;
         $this->qrCode = $qrCode;
-        $this->response = $response;
+        $this->response = $submission->response;
     }
 
     /**

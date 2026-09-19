@@ -29,17 +29,11 @@ class QrGenerator
      * - Tag 9: Certificate Signature (raw signature from X.509 certificate)
      *
      * @param  InvoiceInterface  $invoice  The invoice
-     * @param  string  $signatureValue  Base64 encoded SignatureValue from XML signature
-     * @param  string  $publicKey  Public key - raw SPKI DER bytes
-     * @param  string  $certificateSignature  Raw certificate signature bytes (from X.509 cert)
+     * @param  QrSignature  $signature  The signature value, the public key and the certificate signature
      * @return string Base64 encoded TLV data
      */
-    public function generate(
-        InvoiceInterface $invoice,
-        string $signatureValue,
-        string $publicKey,
-        string $certificateSignature
-    ): string {
+    public function generate(InvoiceInterface $invoice, QrSignature $signature): string
+    {
         $tags = [
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
@@ -47,9 +41,9 @@ class QrGenerator
             4 => $this->formatAmount($invoice->getTotalWithVat()),
             5 => $this->formatAmount($invoice->getTotalVat()),
             6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
-            7 => $signatureValue,                                 // base64 SignatureValue string
-            8 => $this->formatPublicKey($publicKey),             // SPKI DER bytes
-            9 => $certificateSignature,                          // Raw cert signature bytes
+            7 => $signature->signatureValue,                      // base64 SignatureValue string
+            8 => $this->formatPublicKey($signature->publicKey),  // SPKI DER bytes
+            9 => $signature->certificateSignature,               // Raw cert signature bytes
         ];
 
         return $this->encoder->encode($tags);
@@ -159,12 +153,8 @@ class QrGenerator
      */
     public function validate(string $qrCode, bool $isSimplified = false): array
     {
-        $errors = [];
-
         if (! $this->encoder->isValid($qrCode)) {
-            $errors[] = 'Invalid TLV encoding';
-
-            return ['valid' => false, 'errors' => $errors];
+            return ['valid' => false, 'errors' => ['Invalid TLV encoding']];
         }
 
         $tags = $this->decode($qrCode);
@@ -176,11 +166,44 @@ class QrGenerator
             $requiredTags[] = 9;
         }
 
+        $errors = [...$this->missingTagErrors($tags, $requiredTags), ...$this->tagFormatErrors($tags)];
+
+        return [
+            'valid' => empty($errors),
+            'errors' => $errors,
+            'tags' => $tags,
+        ];
+    }
+
+    /**
+     * An error for each required tag that is missing or empty.
+     *
+     * @param  array<int, string>  $tags
+     * @param  list<int>  $requiredTags
+     * @return list<string>
+     */
+    protected function missingTagErrors(array $tags, array $requiredTags): array
+    {
+        $errors = [];
+
         foreach ($requiredTags as $tag) {
             if (! isset($tags[$tag]) || empty($tags[$tag])) {
                 $errors[] = "Missing required tag {$tag}";
             }
         }
+
+        return $errors;
+    }
+
+    /**
+     * An error for each tag whose value is not in the shape ZATCA expects: the VAT number, the timestamp and the amounts.
+     *
+     * @param  array<int, string>  $tags
+     * @return list<string>
+     */
+    protected function tagFormatErrors(array $tags): array
+    {
+        $errors = [];
 
         // Validate VAT number format
         if (isset($tags[2]) && ! preg_match('/^3\d{14}$/', $tags[2])) {
@@ -201,11 +224,7 @@ class QrGenerator
             $errors[] = 'Invalid VAT amount format in tag 5';
         }
 
-        return [
-            'valid' => empty($errors),
-            'errors' => $errors,
-            'tags' => $tags,
-        ];
+        return $errors;
     }
 
     /**

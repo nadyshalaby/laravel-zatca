@@ -8,7 +8,8 @@ class ValidationException extends ZatcaException
 
     public function __construct(string $message = '', array $errors = [], int $code = 0)
     {
-        parent::__construct($message, $code, null, ['errors' => $errors]);
+        parent::__construct($message, $code);
+        $this->context = ['errors' => $errors];
         $this->errors = $errors;
     }
 

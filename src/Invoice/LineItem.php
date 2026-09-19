@@ -28,28 +28,18 @@ class LineItem implements LineItemInterface
 
     protected array $identifiers;
 
-    public function __construct(
-        int $id,
-        string $name,
-        float $quantity,
-        float $unitPrice,
-        VatCategory $vatCategory = VatCategory::STANDARD,
-        ?float $vatRate = null,
-        string $unitCode = 'PCE',
-        float $discount = 0.0,
-        ?VatExemptionReason $vatExemptionReason = null,
-        array $identifiers = []
-    ) {
-        $this->id = $id;
-        $this->name = $name;
-        $this->quantity = $quantity;
-        $this->unitPrice = $unitPrice;
-        $this->vatCategory = $vatCategory;
-        $this->vatRate = $vatRate ?? $vatCategory->defaultRate();
-        $this->unitCode = $unitCode;
-        $this->discount = $discount;
-        $this->vatExemptionReason = $vatExemptionReason;
-        $this->identifiers = $identifiers;
+    public function __construct(LineItemData $data)
+    {
+        $this->id = $data->id;
+        $this->name = $data->name;
+        $this->quantity = $data->quantity;
+        $this->unitPrice = $data->unitPrice;
+        $this->vatCategory = $data->vatCategory;
+        $this->vatRate = $data->vatRate ?? $data->vatCategory->defaultRate();
+        $this->unitCode = $data->unitCode;
+        $this->discount = $data->discount;
+        $this->vatExemptionReason = $data->vatExemptionReason;
+        $this->identifiers = $data->identifiers;
     }
 
     /**
@@ -68,18 +58,19 @@ class LineItem implements LineItemInterface
             $vatExemptionReason = VatExemptionReason::from($vatExemptionReason);
         }
 
-        return new self(
-            id: $data['id'] ?? $id,
-            name: $data['name'],
-            quantity: (float) $data['quantity'],
-            unitPrice: (float) $data['unit_price'],
-            vatCategory: $vatCategory,
-            vatRate: $data['vat_rate'] ?? null,
-            unitCode: $data['unit_code'] ?? 'PCE',
-            discount: (float) ($data['discount'] ?? 0),
-            vatExemptionReason: $vatExemptionReason,
-            identifiers: $data['identifiers'] ?? []
-        );
+        $line = new LineItemData;
+        $line->id = $data['id'] ?? $id;
+        $line->name = $data['name'];
+        $line->quantity = (float) $data['quantity'];
+        $line->unitPrice = (float) $data['unit_price'];
+        $line->vatCategory = $vatCategory;
+        $line->vatRate = $data['vat_rate'] ?? null;
+        $line->unitCode = $data['unit_code'] ?? 'PCE';
+        $line->discount = (float) ($data['discount'] ?? 0);
+        $line->vatExemptionReason = $vatExemptionReason;
+        $line->identifiers = $data['identifiers'] ?? [];
+
+        return new self($line);
     }
 
     public function getId(): int

@@ -49,40 +49,24 @@ class Invoice implements InvoiceInterface
 
     protected array $notes = [];
 
-    public function __construct(
-        string $uuid,
-        string $invoiceNumber,
-        InvoiceType $type,
-        InvoiceSubType $subType,
-        Carbon $issueDate,
-        array $seller,
-        int $icv,
-        string $previousInvoiceHash,
-        ?array $buyer = null,
-        ?Carbon $supplyDate = null,
-        string $currency = 'SAR',
-        ?PaymentMethod $paymentMethod = null,
-        ?string $paymentTerms = null,
-        ?string $originalInvoiceReference = null,
-        ?string $instructionNote = null,
-        array $notes = []
-    ) {
-        $this->uuid = $uuid;
-        $this->invoiceNumber = $invoiceNumber;
-        $this->type = $type;
-        $this->subType = $subType;
-        $this->issueDate = $issueDate;
-        $this->seller = $seller;
-        $this->icv = $icv;
-        $this->previousInvoiceHash = $previousInvoiceHash;
-        $this->buyer = $buyer;
-        $this->supplyDate = $supplyDate;
-        $this->currency = $currency;
-        $this->paymentMethod = $paymentMethod;
-        $this->paymentTerms = $paymentTerms;
-        $this->originalInvoiceReference = $originalInvoiceReference;
-        $this->instructionNote = $instructionNote;
-        $this->notes = $notes;
+    public function __construct(InvoiceData $data)
+    {
+        $this->uuid = $data->uuid;
+        $this->invoiceNumber = $data->invoiceNumber;
+        $this->type = $data->type;
+        $this->subType = $data->subType;
+        $this->issueDate = $data->issueDate;
+        $this->seller = $data->seller;
+        $this->icv = $data->icv;
+        $this->previousInvoiceHash = $data->previousInvoiceHash;
+        $this->buyer = $data->buyer;
+        $this->supplyDate = $data->supplyDate;
+        $this->currency = $data->currency;
+        $this->paymentMethod = $data->paymentMethod;
+        $this->paymentTerms = $data->paymentTerms;
+        $this->originalInvoiceReference = $data->originalInvoiceReference;
+        $this->instructionNote = $data->instructionNote;
+        $this->notes = $data->notes;
     }
 
     /**

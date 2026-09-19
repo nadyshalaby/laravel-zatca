@@ -7,7 +7,6 @@ use Corecave\Zatca\Contracts\InvoiceInterface;
 use Corecave\Zatca\Enums\InvoiceSubType;
 use Corecave\Zatca\Enums\InvoiceType;
 use Corecave\Zatca\Enums\PaymentMethod;
-use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Hash\HashChainManager;
 use Illuminate\Support\Str;
@@ -66,14 +65,22 @@ class InvoiceBuilder
     }
 
     /**
+     * Create a builder with the seller and invoice settings of the package config.
+     */
+    public static function fromConfig(): self
+    {
+        return new self(
+            config('zatca.seller', []),
+            config('zatca.invoice', [])
+        );
+    }
+
+    /**
      * Create a standard (B2B) invoice builder.
      */
     public static function standard(): self
     {
-        $builder = new self(
-            config('zatca.seller', []),
-            config('zatca.invoice', [])
-        );
+        $builder = self::fromConfig();
 
         $builder->isSimplified = false;
         $builder->type = InvoiceType::INVOICE;
@@ -87,10 +94,7 @@ class InvoiceBuilder
      */
     public static function simplified(): self
     {
-        $builder = new self(
-            config('zatca.seller', []),
-            config('zatca.invoice', [])
-        );
+        $builder = self::fromConfig();
 
         $builder->isSimplified = true;
         $builder->type = InvoiceType::INVOICE;
@@ -104,10 +108,7 @@ class InvoiceBuilder
      */
     public static function creditNote(bool $simplified = false): self
     {
-        $builder = new self(
-            config('zatca.seller', []),
-            config('zatca.invoice', [])
-        );
+        $builder = self::fromConfig();
 
         $builder->isSimplified = $simplified;
         $builder->isCreditNote = true;
@@ -124,10 +125,7 @@ class InvoiceBuilder
      */
     public static function debitNote(bool $simplified = false): self
     {
-        $builder = new self(
-            config('zatca.seller', []),
-            config('zatca.invoice', [])
-        );
+        $builder = self::fromConfig();
 
         $builder->isSimplified = $simplified;
         $builder->isDebitNote = true;
@@ -321,24 +319,7 @@ class InvoiceBuilder
         $this->prepareDefaults();
         $this->validate();
 
-        $invoice = new Invoice(
-            uuid: $this->uuid,
-            invoiceNumber: $this->invoiceNumber,
-            type: $this->type,
-            subType: $this->subType,
-            issueDate: $this->issueDate,
-            seller: $this->seller,
-            icv: $this->icv,
-            previousInvoiceHash: $this->previousInvoiceHash,
-            buyer: $this->buyer,
-            supplyDate: $this->supplyDate,
-            currency: $this->currency,
-            paymentMethod: $this->paymentMethod,
-            paymentTerms: $this->paymentTerms,
-            originalInvoiceReference: $this->originalInvoiceReference,
-            instructionNote: $this->instructionNote,
-            notes: $this->notes
-        );
+        $invoice = new Invoice($this->invoiceData());
 
         // Add line items
         foreach ($this->lineItems as $index => $itemData) {
@@ -347,6 +328,32 @@ class InvoiceBuilder
         }
 
         return $invoice;
+    }
+
+    /**
+     * The builder's values as the data an invoice is made of.
+     */
+    protected function invoiceData(): InvoiceData
+    {
+        $data = new InvoiceData;
+        $data->uuid = $this->uuid;
+        $data->invoiceNumber = $this->invoiceNumber;
+        $data->type = $this->type;
+        $data->subType = $this->subType;
+        $data->issueDate = $this->issueDate;
+        $data->seller = $this->seller;
+        $data->icv = $this->icv;
+        $data->previousInvoiceHash = $this->previousInvoiceHash;
+        $data->buyer = $this->buyer;
+        $data->supplyDate = $this->supplyDate;
+        $data->currency = $this->currency;
+        $data->paymentMethod = $this->paymentMethod;
+        $data->paymentTerms = $this->paymentTerms;
+        $data->originalInvoiceReference = $this->originalInvoiceReference;
+        $data->instructionNote = $this->instructionNote;
+        $data->notes = $this->notes;
+
+        return $data;
     }
 
     /**
@@ -468,37 +475,19 @@ class InvoiceBuilder
      */
     public function sample(): InvoiceInterface
     {
-        $this->setInvoiceNumber('SME00001')
+        $this->setInvoiceNumber(ComplianceSample::INVOICE_NUMBER)
             ->setIssueDate(Carbon::now())
-            ->addLineItem([
-                'name' => 'Sample Item',
-                'quantity' => 1,
-                'unit_price' => 100.00,
-                'vat_category' => VatCategory::STANDARD,
-                'vat_rate' => 15.00,
-            ]);
+            ->addLineItem(ComplianceSample::LINE_ITEM);
 
         // Standard invoices require buyer with full address
         if (! $this->isSimplified) {
-            $this->setBuyer([
-                'name' => 'Sample Buyer',
-                'vat_number' => '310122393500003',
-                'registration_number' => '3101223935',
-                'address' => [
-                    'street' => 'Sample Street',
-                    'building' => '1234',
-                    'city' => 'Riyadh',
-                    'postal_code' => '12345',
-                    'district' => 'Sample District',
-                    'country' => 'SA',
-                ],
-            ]);
+            $this->setBuyer(ComplianceSample::STANDARD_BUYER);
         }
 
         // Credit/debit notes require original invoice reference and reason
         if ($this->isCreditNote || $this->isDebitNote) {
-            $this->setOriginalInvoice('INV-2024-001')
-                ->setReason('Correction of invoice');
+            $this->setOriginalInvoice(ComplianceSample::ORIGINAL_INVOICE)
+                ->setReason(ComplianceSample::REASON);
         }
 
         return $this->build();

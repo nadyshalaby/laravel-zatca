@@ -3,6 +3,7 @@
 namespace Corecave\Zatca\Certificate;
 
 use Corecave\Zatca\Exceptions\CertificateException;
+use OpenSSLAsymmetricKey;
 
 class CsrGenerator
 {
@@ -44,63 +45,103 @@ class CsrGenerator
         $this->validateConfig($config);
 
         try {
-            // Create OpenSSL config for ZATCA-compliant CSR
-            $opensslConfig = $this->buildOpensslConfig($config);
-
-            // Write temporary config file
-            $configFile = tempnam(sys_get_temp_dir(), 'zatca_csr_');
-            file_put_contents($configFile, $opensslConfig);
-
-            // Generate EC private key with secp256k1 curve (required by ZATCA)
-            $privateKeyResource = openssl_pkey_new([
-                'config' => $configFile,
-                'private_key_type' => OPENSSL_KEYTYPE_EC,
-                'curve_name' => 'secp256k1',
-            ]);
-
-            if ($privateKeyResource === false) {
-                throw CertificateException::withContext('Failed to generate private key: '.openssl_error_string());
-            }
-
-            // Export private key
-            openssl_pkey_export($privateKeyResource, $privateKey);
-
-            // Get public key
-            $keyDetails = openssl_pkey_get_details($privateKeyResource);
-            $publicKey = $keyDetails['key'];
-
-            // Build Distinguished Name
-            $dn = $this->buildDistinguishedName($config);
-
-            // Generate CSR with custom config
-            $csrResource = openssl_csr_new(
-                $dn,
-                $privateKeyResource,
-                [
-                    'config' => $configFile,
-                    'req_extensions' => 'req_ext',
-                    'digest_alg' => 'sha256',
-                ]
-            );
-
-            if ($csrResource === false) {
-                throw CertificateException::withContext('Failed to generate CSR: '.openssl_error_string());
-            }
-
-            // Export CSR
-            openssl_csr_export($csrResource, $csr);
-
-            // Clean up temp file
-            @unlink($configFile);
-
-            return [
-                'csr' => $csr,
-                'private_key' => $privateKey,
-                'public_key' => $publicKey,
-            ];
+            return $this->generateKeyAndRequest($config);
         } catch (\Exception $e) {
             throw CertificateException::csrGenerationFailed($e->getMessage());
         }
+    }
+
+    /**
+     * Generate the EC key pair and the CSR signed with it, through a temporary OpenSSL config file.
+     *
+     * @param  array<string, mixed>  $config
+     * @return array{csr: string, private_key: string, public_key: string}
+     *
+     * @throws CertificateException
+     */
+    protected function generateKeyAndRequest(array $config): array
+    {
+        // Create OpenSSL config for ZATCA-compliant CSR
+        $opensslConfig = $this->buildOpensslConfig($config);
+
+        // Write temporary config file
+        $configFile = tempnam(sys_get_temp_dir(), 'zatca_csr_');
+        file_put_contents($configFile, $opensslConfig);
+
+        $privateKeyResource = $this->createPrivateKey($configFile);
+
+        // Export private key
+        openssl_pkey_export($privateKeyResource, $privateKey);
+
+        // Get public key
+        $keyDetails = openssl_pkey_get_details($privateKeyResource);
+        $publicKey = $keyDetails['key'];
+
+        $csr = $this->createCsr($config, $privateKeyResource, $configFile);
+
+        // Clean up temp file
+        if (is_file($configFile)) {
+            unlink($configFile);
+        }
+
+        return [
+            'csr' => $csr,
+            'private_key' => $privateKey,
+            'public_key' => $publicKey,
+        ];
+    }
+
+    /**
+     * Generate an EC private key on the secp256k1 curve ZATCA requires.
+     *
+     * @throws CertificateException
+     */
+    protected function createPrivateKey(string $configFile): OpenSSLAsymmetricKey
+    {
+        $privateKeyResource = openssl_pkey_new([
+            'config' => $configFile,
+            'private_key_type' => OPENSSL_KEYTYPE_EC,
+            'curve_name' => 'secp256k1',
+        ]);
+
+        if ($privateKeyResource === false) {
+            throw CertificateException::withContext('Failed to generate private key: '.openssl_error_string());
+        }
+
+        return $privateKeyResource;
+    }
+
+    /**
+     * Generate the CSR for the configured subject, signed with the private key, as PEM.
+     *
+     * @param  array<string, mixed>  $config
+     *
+     * @throws CertificateException
+     */
+    protected function createCsr(array $config, OpenSSLAsymmetricKey $privateKey, string $configFile): string
+    {
+        // Build Distinguished Name
+        $dn = $this->buildDistinguishedName($config);
+
+        // Generate CSR with custom config
+        $csrResource = openssl_csr_new(
+            $dn,
+            $privateKey,
+            [
+                'config' => $configFile,
+                'req_extensions' => 'req_ext',
+                'digest_alg' => 'sha256',
+            ]
+        );
+
+        if ($csrResource === false) {
+            throw CertificateException::withContext('Failed to generate CSR: '.openssl_error_string());
+        }
+
+        // Export CSR
+        openssl_csr_export($csrResource, $csr);
+
+        return $csr;
     }
 
     /**
@@ -108,14 +149,16 @@ class CsrGenerator
      */
     protected function buildOpensslConfig(array $config): string
     {
-        $serialNumber = $config['serial_number'] ?? '1-TST|2-TST|3-'.$this->generateUuid();
-        $vatNumber = $config['vat_number'];
-        $invoiceTypes = $config['invoice_types'] ?? '1100';
-        $location = $config['location'] ?? [];
-        $address = is_array($location)
-            ? ($location['city'] ?? 'Riyadh')
-            : $location;
-        $businessCategory = $config['business_category'] ?? 'Technology';
+        return $this->opensslRequestSections($config)."\n\n".$this->opensslAltNamesSection($config);
+    }
+
+    /**
+     * The OpenSSL config sections for the request, its subject and its extensions.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    protected function opensslRequestSections(array $config): string
+    {
         $templateName = self::ZATCA_TEMPLATE_NAME;
 
         return <<<EOT
@@ -141,7 +184,26 @@ CN = {$config['common_name']}
 [req_ext]
 certificateTemplateName = ASN1:PRINTABLESTRING:{$templateName}
 subjectAltName = dirName:alt_names
+EOT;
+    }
 
+    /**
+     * The OpenSSL config section for the subject alternative names ZATCA reads the EGS details from.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    protected function opensslAltNamesSection(array $config): string
+    {
+        $serialNumber = $config['serial_number'] ?? '1-TST|2-TST|3-'.$this->generateUuid();
+        $vatNumber = $config['vat_number'];
+        $invoiceTypes = $config['invoice_types'] ?? '1100';
+        $location = $config['location'] ?? [];
+        $address = is_array($location)
+            ? ($location['city'] ?? 'Riyadh')
+            : $location;
+        $businessCategory = $config['business_category'] ?? 'Technology';
+
+        return <<<EOT
 [alt_names]
 SN = {$serialNumber}
 UID = {$vatNumber}
@@ -152,25 +214,19 @@ EOT;
     }
 
     /**
-     * Generate a CSR with custom serial number components.
+     * Generate a CSR whose EGS serial number is built from the given parts.
      *
-     * @param  string  $companyName  Company name
-     * @param  string  $version  EGS version (e.g., '1.0')
-     * @param  string  $uuid  EGS unit UUID
      * @return array{csr: string, private_key: string, public_key: string, serial_number: string}
      *
      * @throws CertificateException
      */
-    public function generateWithSerial(string $companyName, string $version, string $uuid, ?array $config = null): array
+    public function generateWithSerial(EgsSerialNumber $serialNumber, ?array $config = null): array
     {
         $config = $config ?? $this->config;
-
-        // Build serial number in ZATCA format: 1-CompanyName|2-Version|3-UUID
-        $serialNumber = sprintf('1-%s|2-%s|3-%s', $companyName, $version, $uuid);
-        $config['serial_number'] = $serialNumber;
+        $config['serial_number'] = (string) $serialNumber;
 
         $result = $this->generate($config);
-        $result['serial_number'] = $serialNumber;
+        $result['serial_number'] = $config['serial_number'];
 
         return $result;
     }

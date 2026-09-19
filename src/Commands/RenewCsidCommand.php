@@ -4,8 +4,10 @@ namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
+use Corecave\Zatca\Certificate\CsidRenewal;
 use Corecave\Zatca\Certificate\CsrGenerator;
 use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\CertificateInterface;
 use Illuminate\Console\Command;
 
 class RenewCsidCommand extends Command
@@ -25,11 +27,8 @@ class RenewCsidCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle(
-        CertificateManager $certManager,
-        CsrGenerator $csrGenerator,
-        ZatcaClient $client
-    ): int {
+    public function handle(CertificateManager $certManager, CsrGenerator $csrGenerator, ZatcaClient $client): int
+    {
         $this->info('ZATCA Production CSID Renewal');
         $this->newLine();
 
@@ -43,20 +42,8 @@ class RenewCsidCommand extends Command
             return self::FAILURE;
         }
 
-        // Check expiry
-        $daysUntilExpiry = $currentCert->getExpiresAt()?->diffInDays(now()) ?? 0;
-
-        $this->components->twoColumnDetail('Current Certificate Expires', $currentCert->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'Unknown');
-        $this->components->twoColumnDetail('Days Until Expiry', (string) $daysUntilExpiry);
-        $this->newLine();
-
-        // Warn if not expiring soon
-        if ($daysUntilExpiry > 30 && ! $this->option('force')) {
-            $this->warn('Certificate is not expiring soon.');
-
-            if (! $this->confirm('Do you still want to renew?', false)) {
-                return self::SUCCESS;
-            }
+        if (! $this->confirmRenewal($currentCert)) {
+            return self::SUCCESS;
         }
 
         // Get OTP
@@ -76,12 +63,42 @@ class RenewCsidCommand extends Command
             return self::FAILURE;
         }
 
+        return $this->requestRenewal($certManager, $client, new CsidRenewal($currentCert, $csrData, $otp));
+    }
+
+    /**
+     * Show when the current certificate expires, and whether to renew it: one that is not expiring soon is renewed only when forced or confirmed.
+     */
+    protected function confirmRenewal(CertificateInterface $currentCert): bool
+    {
+        // Check expiry
+        $daysUntilExpiry = $currentCert->getExpiresAt()?->diffInDays(now()) ?? 0;
+
+        $this->components->twoColumnDetail('Current Certificate Expires', $currentCert->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'Unknown');
+        $this->components->twoColumnDetail('Days Until Expiry', (string) $daysUntilExpiry);
+        $this->newLine();
+
+        // Warn if not expiring soon
+        if ($daysUntilExpiry > 30 && ! $this->option('force')) {
+            $this->warn('Certificate is not expiring soon.');
+
+            return $this->confirm('Do you still want to renew?', false);
+        }
+
+        return true;
+    }
+
+    /**
+     * Request the renewal from ZATCA, and store and show the new certificate.
+     */
+    protected function requestRenewal(CertificateManager $certManager, ZatcaClient $client, CsidRenewal $renewal): int
+    {
         // Request renewal
         $this->info('Requesting CSID renewal...');
 
         try {
-            $client->setCertificate($currentCert);
-            $response = $client->renewProductionCsid($csrData['csr'], $otp);
+            $client->setCertificate($renewal->certificate);
+            $response = $client->renewProductionCsid($renewal->csrData['csr'], $renewal->otp);
 
             $this->info('CSID renewed successfully!');
             $this->newLine();
@@ -89,7 +106,7 @@ class RenewCsidCommand extends Command
             // Store new certificate
             $newCert = Certificate::fromApiResponse(
                 $response,
-                $csrData['private_key'],
+                $renewal->csrData['private_key'],
                 'production'
             );
 

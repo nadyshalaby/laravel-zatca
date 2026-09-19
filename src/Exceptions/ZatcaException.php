@@ -8,12 +8,6 @@ class ZatcaException extends Exception
 {
     protected array $context = [];
 
-    public function __construct(string $message = '', int $code = 0, ?Exception $previous = null, array $context = [])
-    {
-        parent::__construct($message, $code, $previous);
-        $this->context = $context;
-    }
-
     /**
      * Get the exception context.
      */
@@ -27,6 +21,9 @@ class ZatcaException extends Exception
      */
     public static function withContext(string $message, array $context = []): static
     {
-        return new static($message, 0, null, $context);
+        $exception = new static($message);
+        $exception->context = $context;
+
+        return $exception;
     }
 }

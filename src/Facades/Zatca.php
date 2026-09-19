@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \Corecave\Zatca\Results\ClearanceResult clear(InvoiceInterface $invoice)
  * @method static \Corecave\Zatca\Results\ProcessResult process(InvoiceInterface $invoice)
  * @method static \Corecave\Zatca\Results\ComplianceResult compliance()
- * @method static string generateQrCode(InvoiceInterface $invoice, string $signature, string $publicKey)
+ * @method static string generateQrCode(InvoiceInterface $invoice, \Corecave\Zatca\Qr\QrSignature $signature)
  * @method static string generateXml(InvoiceInterface $invoice)
  * @method static string signXml(string $xml)
  * @method static bool validateXml(string $xml)

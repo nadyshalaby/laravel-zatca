@@ -435,6 +435,23 @@ try {
 
 ## Changelog
 
+### Unreleased
+
+#### Changed
+
+Every method now takes at most three parameters, so the long parameter lists moved into named value objects. The XML, hashes, QR codes and signatures the package produces are unchanged. Callers change as follows:
+
+- `Zatca::generateQrCode($invoice, $signatureValue, $publicKey, $certificateSignature)` is now `Zatca::generateQrCode($invoice, new QrSignature($signatureValue, $publicKey, $certificateSignature))`, and `QrGenerator::generate()` takes the same two arguments.
+- `new Invoice(...)` takes one `InvoiceData` and `new LineItem(...)` one `LineItemData`: set their public properties by name. `InvoiceBuilder` and `LineItem::fromArray()` work as before.
+- `new Certificate($type, $certificate, $privateKey, $secret, $requestId, $issuedAt, $expiresAt, $active, $metadata)` is now `new Certificate(new CertificateOrigin($type, $requestId, $metadata), new CertificateCredentials($certificate, $privateKey, $secret), new CertificateLifetime($issuedAt, $expiresAt, $active))`. `Certificate::fromApiResponse()` and `Certificate::fromArray()` work as before.
+- `CertificateManager::import($type, $certificatePath, $privateKeyPath, $secret, $requestId)` is now `import(new CertificateOrigin($type, $requestId), new CertificateFiles($certificatePath, $privateKeyPath), $secret)`.
+- `CsrGenerator::generateWithSerial($companyName, $version, $uuid, $config)` is now `generateWithSerial(new EgsSerialNumber($companyName, $version, $uuid), $config)`.
+- `HashChainManager::recordInvoice(...)` takes one `InvoiceRecord`: set its public properties by name. `updateInvoiceStatus($uuid, $status, $zatcaResponse, $signedXml, $qrCode)` is now `updateInvoiceStatus($uuid, $status, new StatusUpdate($zatcaResponse, $signedXml, $qrCode))`.
+- `DebugDumper::dumpAll($invoiceId, $unsignedXml, $signedXml, $qrCode, $hash)` is now `dumpAll($invoiceId, new InvoiceDocuments($unsignedXml, $signedXml, $qrCode), $hash)`.
+- `new ReportResult($invoice, $signedXml, $qrCode, $response)` is now `new ReportResult(new Submission($invoice, $response), $signedXml, $qrCode)`, and `ClearanceResult` likewise.
+- `ZatcaException` has no constructor of its own: build one with context through `ZatcaException::withContext($message, $context)`. `ApiException`'s constructor no longer takes the ZATCA errors and warnings; `ApiException::fromResponse()` reads them from the response.
+- `UblGenerator` writes the parties, totals and lines through `UblPartyWriter`, `UblTotalsWriter` and `UblLineWriter`; its public methods are unchanged.
+
 ### v1.1.0 (2024-12-13)
 
 #### Fixed

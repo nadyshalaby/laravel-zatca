@@ -234,10 +234,8 @@ class CertificateManager
     {
         try {
             $cert = new Certificate(
-                type: 'validation',
-                certificate: $certificate,
-                privateKey: $privateKey,
-                secret: ''
+                new CertificateOrigin('validation'),
+                new CertificateCredentials($certificate, $privateKey, '')
             );
 
             // Try to get public key from cert and compare with derived public key
@@ -252,35 +250,24 @@ class CertificateManager
     /**
      * Import a certificate from PEM files.
      */
-    public function import(
-        string $type,
-        string $certificatePath,
-        string $privateKeyPath,
-        string $secret,
-        ?string $requestId = null
-    ): CertificateInterface {
-        if (! File::exists($certificatePath)) {
-            throw CertificateException::invalid("Certificate file not found: {$certificatePath}");
+    public function import(CertificateOrigin $origin, CertificateFiles $files, string $secret): CertificateInterface
+    {
+        if (! File::exists($files->certificatePath)) {
+            throw CertificateException::invalid("Certificate file not found: {$files->certificatePath}");
         }
 
-        if (! File::exists($privateKeyPath)) {
-            throw CertificateException::invalid("Private key file not found: {$privateKeyPath}");
+        if (! File::exists($files->privateKeyPath)) {
+            throw CertificateException::invalid("Private key file not found: {$files->privateKeyPath}");
         }
 
-        $certificate = File::get($certificatePath);
-        $privateKey = File::get($privateKeyPath);
+        $certificate = File::get($files->certificatePath);
+        $privateKey = File::get($files->privateKeyPath);
 
         if (! $this->validateKeyPair($certificate, $privateKey)) {
             throw CertificateException::keyMismatch();
         }
 
-        $cert = new Certificate(
-            type: $type,
-            certificate: $certificate,
-            privateKey: $privateKey,
-            secret: $secret,
-            requestId: $requestId
-        );
+        $cert = new Certificate($origin, new CertificateCredentials($certificate, $privateKey, $secret));
 
         return $this->store($cert);
     }

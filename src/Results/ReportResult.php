@@ -14,16 +14,12 @@ class ReportResult
 
     protected array $response;
 
-    public function __construct(
-        InvoiceInterface $invoice,
-        string $signedXml,
-        string $qrCode,
-        array $response
-    ) {
-        $this->invoice = $invoice;
+    public function __construct(Submission $submission, string $signedXml, string $qrCode)
+    {
+        $this->invoice = $submission->invoice;
         $this->signedXml = $signedXml;
         $this->qrCode = $qrCode;
-        $this->response = $response;
+        $this->response = $submission->response;
     }
 
     /**

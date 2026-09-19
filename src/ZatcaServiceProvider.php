@@ -31,6 +31,15 @@ class ZatcaServiceProvider extends ServiceProvider
             'zatca'
         );
 
+        $this->registerCoreServices();
+        $this->registerDocumentServices();
+    }
+
+    /**
+     * Register the ZATCA manager, the API client, and the CSR and certificate services.
+     */
+    protected function registerCoreServices(): void
+    {
         // Register the main Zatca manager
         $this->app->singleton('zatca', function ($app) {
             return new ZatcaManager($app);
@@ -54,7 +63,13 @@ class ZatcaServiceProvider extends ServiceProvider
                 config('zatca.certificates', [])
             );
         });
+    }
 
+    /**
+     * Register the services that build, sign, validate, stamp and chain invoice documents.
+     */
+    protected function registerDocumentServices(): void
+    {
         // Register UBL generator
         $this->app->singleton(UblGenerator::class, function ($app) {
             return new UblGenerator;
@@ -82,10 +97,7 @@ class ZatcaServiceProvider extends ServiceProvider
 
         // Register invoice builder
         $this->app->bind(InvoiceBuilder::class, function ($app) {
-            return new InvoiceBuilder(
-                config('zatca.seller', []),
-                config('zatca.invoice', [])
-            );
+            return InvoiceBuilder::fromConfig();
         });
 
         // Register debug dumper

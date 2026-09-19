@@ -274,37 +274,38 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Retry decision function.
+     *
+     * Guzzle hands it the attempt's outcome as two more arguments: the response, or null,
+     * then the exception, or null.
      */
     protected function retryDecider(): callable
     {
-        return function (
-            int $retries,
-            RequestInterface $request,
-            ?ResponseInterface $response = null,
-            ?\Exception $exception = null
-        ): bool {
+        return function (int $retries, RequestInterface $request, ResponseInterface|\Exception|null ...$outcome): bool {
+            [$response, $exception] = $outcome + [null, null];
+
+            $retryable = $this->isRetryable(
+                $response instanceof ResponseInterface ? $response : null,
+                $exception instanceof \Exception ? $exception : null
+            );
+
             // Don't retry more than configured times
-            if ($retries >= $this->config['retries']) {
-                return false;
-            }
-
-            // Retry on connection errors
-            if ($exception instanceof ConnectException) {
-                return true;
-            }
-
-            // Retry on server errors (5xx)
-            if ($response && $response->getStatusCode() >= 500) {
-                return true;
-            }
-
-            // Retry on rate limiting
-            if ($response && $response->getStatusCode() === 429) {
-                return true;
-            }
-
-            return false;
+            return $retries < $this->config['retries'] && $retryable;
         };
+    }
+
+    /**
+     * Whether an attempt failed in a way worth retrying: a connection error, a server error or a rate limit.
+     */
+    protected function isRetryable(?ResponseInterface $response = null, ?\Exception $exception = null): bool
+    {
+        // Retry on connection errors
+        if ($exception instanceof ConnectException) {
+            return true;
+        }
+
+        // Retry on server errors (5xx) and on rate limiting
+        return $response !== null
+            && ($response->getStatusCode() >= 500 || $response->getStatusCode() === 429);
     }
 
     /**
