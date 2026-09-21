@@ -72,14 +72,6 @@ class CertificateManager
     }
 
     /**
-     * Delete a certificate.
-     */
-    public function delete(int $id): bool
-    {
-        return ZatcaCertificate::destroy($id) > 0;
-    }
-
-    /**
      * Get all certificates.
      */
     public function all(): array
