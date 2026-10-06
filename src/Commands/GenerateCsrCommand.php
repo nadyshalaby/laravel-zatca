@@ -19,7 +19,7 @@ class GenerateCsrCommand extends Command
                             {--organization-unit= : Organization unit}
                             {--common-name= : Common name}
                             {--vat-number= : VAT registration number (15 digits)}
-                            {--invoice-types=1100 : Invoice types (1000=B2C, 0100=B2B, 1100=Both)}
+                            {--invoice-types= : Invoice types (1000=B2C, 0100=B2B, 1100=Both), the configured ones when left out}
                             {--save : Save CSR and private key to files}
                             {--output= : Output directory for files}';
 
