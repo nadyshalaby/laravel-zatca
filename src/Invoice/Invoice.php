@@ -24,8 +24,10 @@ class Invoice implements InvoiceInterface
 
     protected ?Carbon $supplyDate;
 
+    /** @var array<string, mixed> */
     protected array $seller;
 
+    /** @var array<string, mixed>|null */
     protected ?array $buyer;
 
     /** @var LineItemInterface[] */
@@ -47,6 +49,7 @@ class Invoice implements InvoiceInterface
 
     protected ?string $instructionNote;
 
+    /** @var array<int, string> */
     protected array $notes = [];
 
     public function __construct(InvoiceData $data)

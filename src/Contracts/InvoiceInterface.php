@@ -5,6 +5,8 @@ namespace Corecave\Zatca\Contracts;
 use Corecave\Zatca\Enums\InvoiceSubType;
 use Corecave\Zatca\Enums\InvoiceType;
 use Corecave\Zatca\Enums\PaymentMethod;
+use Corecave\Zatca\Enums\VatCategory;
+use Corecave\Zatca\Enums\VatExemptionReason;
 use DateTimeInterface;
 
 interface InvoiceInterface
@@ -51,6 +53,8 @@ interface InvoiceInterface
 
     /**
      * Get seller information.
+     *
+     * @return array<string, mixed>
      */
     public function getSeller(): array;
 
@@ -61,11 +65,15 @@ interface InvoiceInterface
 
     /**
      * Get buyer information.
+     *
+     * @return array<string, mixed>|null
      */
     public function getBuyer(): ?array;
 
     /**
      * Get line items.
+     *
+     * @return array<int, LineItemInterface>
      */
     public function getLineItems(): array;
 
@@ -161,16 +169,22 @@ interface InvoiceInterface
 
     /**
      * Get additional notes.
+     *
+     * @return array<int, string>
      */
     public function getNotes(): array;
 
     /**
      * Get VAT breakdown by category.
+     *
+     * @return array<int, array{category: VatCategory, rate: float, taxable_amount: float, tax_amount: float, exemption_reason: VatExemptionReason|null}>
      */
     public function getVatBreakdown(): array;
 
     /**
      * Convert to array.
+     *
+     * @return array<string, mixed>
      */
     public function toArray(): array;
 }

@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 
 class InvoiceBuilder
 {
+    /** @var array<string, mixed> */
     protected array $sellerConfig;
 
     protected ?string $uuid = null;
@@ -27,10 +28,13 @@ class InvoiceBuilder
 
     protected ?Carbon $supplyDate = null;
 
+    /** @var array<string, mixed>|null */
     protected ?array $seller = null;
 
+    /** @var array<string, mixed>|null */
     protected ?array $buyer = null;
 
+    /** @var array<int, array<string, mixed>> */
     protected array $lineItems = [];
 
     protected string $currency;
@@ -47,6 +51,7 @@ class InvoiceBuilder
 
     protected ?string $instructionNote = null;
 
+    /** @var array<int, string> */
     protected array $notes = [];
 
     protected bool $isSimplified = false;
@@ -55,6 +60,10 @@ class InvoiceBuilder
 
     protected bool $isDebitNote = false;
 
+    /**
+     * @param  array<string, mixed>  $sellerConfig
+     * @param  array<string, mixed>  $invoiceConfig
+     */
     public function __construct(array $sellerConfig = [], array $invoiceConfig = [])
     {
         $this->sellerConfig = $sellerConfig;
@@ -176,6 +185,8 @@ class InvoiceBuilder
 
     /**
      * Set seller information.
+     *
+     * @param  array<string, mixed>  $seller
      */
     public function setSeller(array $seller): self
     {
@@ -186,6 +197,8 @@ class InvoiceBuilder
 
     /**
      * Set buyer information.
+     *
+     * @param  array<string, mixed>  $buyer
      */
     public function setBuyer(array $buyer): self
     {
@@ -196,6 +209,8 @@ class InvoiceBuilder
 
     /**
      * Add a line item.
+     *
+     * @param  array<string, mixed>  $item
      */
     public function addLineItem(array $item): self
     {
@@ -206,6 +221,8 @@ class InvoiceBuilder
 
     /**
      * Set all line items.
+     *
+     * @param  array<int, array<string, mixed>>  $items
      */
     public function setLineItems(array $items): self
     {
@@ -449,6 +466,8 @@ class InvoiceBuilder
 
     /**
      * Validate a line item.
+     *
+     * @param  array<string, mixed>  $item
      *
      * @throws InvoiceException
      */

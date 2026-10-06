@@ -36,6 +36,7 @@ class DebugDumper
 
     protected string $basePath;
 
+    /** @var array<string, mixed> */
     protected array $options;
 
     public function __construct()
@@ -147,6 +148,8 @@ class DebugDumper
 
     /**
      * Dump all invoice artifacts at once.
+     *
+     * @return array<string, string>
      */
     public function dumpAll(string $invoiceId, InvoiceDocuments $documents = new InvoiceDocuments, ?string $hash = null): array
     {
@@ -291,7 +294,7 @@ class DebugDumper
             'qr_base64_length' => strlen($qrCode),
             'tlv_raw_length' => $tlvLength,
             'tags' => $tags,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 
     /**

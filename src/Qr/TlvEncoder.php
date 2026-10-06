@@ -145,6 +145,8 @@ class TlvEncoder
 
     /**
      * Get human-readable format of TLV data.
+     *
+     * @return list<array{tag: int, name: string, length: int, value: string}>
      */
     public function toHumanReadable(string $tlvBase64): array
     {

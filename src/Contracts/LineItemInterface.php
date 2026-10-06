@@ -69,11 +69,15 @@ interface LineItemInterface
 
     /**
      * Get additional item identifiers (e.g., SKU, barcode).
+     *
+     * @return array<string, mixed>
      */
     public function getIdentifiers(): array;
 
     /**
      * Convert to array.
+     *
+     * @return array<string, mixed>
      */
     public function toArray(): array;
 }

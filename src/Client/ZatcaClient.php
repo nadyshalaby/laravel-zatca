@@ -21,8 +21,14 @@ class ZatcaClient implements ApiClientInterface
 
     protected ?CertificateInterface $certificate = null;
 
+    /**
+     * @var array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
+     */
     protected array $config;
 
+    /**
+     * @param  array{timeout?: int, connect_timeout?: int, retries?: int, retry_delay?: int, verify_ssl?: bool, api_version?: string}  $config
+     */
     public function __construct(string $environment = 'sandbox', array $config = [])
     {
         $this->environment = Environment::from($environment);
@@ -68,6 +74,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Request a Compliance CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function requestComplianceCsid(string $csr, string $otp): array
     {
@@ -88,6 +96,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Submit an invoice for compliance check.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function submitComplianceInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -107,6 +117,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Request a Production CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function requestProductionCsid(string $complianceRequestId): array
     {
@@ -124,6 +136,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Renew a Production CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function renewProductionCsid(string $csr, string $otp): array
     {
@@ -143,6 +157,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Report a simplified invoice (B2C).
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function reportInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -162,6 +178,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Clear a standard invoice (B2B).
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function clearInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -200,7 +218,7 @@ class ZatcaClient implements ApiClientInterface
     /**
      * The settings the client was built with: its timeouts, retries, SSL check and API version.
      *
-     * @return array<string, mixed>
+     * @return array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
      */
     public function getConfig(): array
     {
@@ -209,6 +227,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Get authentication headers.
+     *
+     * @return array<string, string>
      */
     protected function getAuthHeaders(): array
     {
@@ -251,6 +271,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Handle API response.
+     *
+     * @return array<string, mixed>
      *
      * @throws ApiException
      */
@@ -369,6 +391,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Log API response.
+     *
+     * @param  array<string, mixed>  $body
      */
     protected function logResponse(int $statusCode, array $body): void
     {

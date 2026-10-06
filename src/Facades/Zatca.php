@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool isSandbox()
  * @method static \Corecave\Zatca\Contracts\CertificateInterface getOrCreateCertificate(bool $forceNew = false)
  * @method static \Corecave\Zatca\Contracts\CertificateInterface autoOnboard(string $otp = '123456')
- * @method static array signWithFreshCertificate(InvoiceInterface $invoice)
+ * @method static array{certificate: \Corecave\Zatca\Contracts\CertificateInterface, signedXml: string, hash: string} signWithFreshCertificate(InvoiceInterface $invoice)
  *
  * @see ZatcaManager
  */

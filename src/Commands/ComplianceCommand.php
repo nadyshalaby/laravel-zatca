@@ -110,6 +110,8 @@ class ComplianceCommand extends Command
 
     /**
      * Get CSR data from file or generate new.
+     *
+     * @return array{csr: string, private_key: string}|null
      */
     protected function getCsrData(): ?array
     {
@@ -148,16 +150,22 @@ class ComplianceCommand extends Command
     }
 
     /**
-     * Read a CSR and its private key from their files.
+     * Read a CSR and its private key from their files, or null when either cannot be read.
      *
-     * @return array{csr: string|false, private_key: string|false}
+     * @return array{csr: string, private_key: string}|null
      */
-    protected function readCsrData(string $csrPath, string $keyPath): array
+    protected function readCsrData(string $csrPath, string $keyPath): ?array
     {
-        return [
-            'csr' => file_get_contents($csrPath),
-            'private_key' => file_get_contents($keyPath),
-        ];
+        $csr = file_get_contents($csrPath);
+        $privateKey = file_get_contents($keyPath);
+
+        if ($csr === false || $privateKey === false) {
+            $this->error('CSR or private key file cannot be read');
+
+            return null;
+        }
+
+        return ['csr' => $csr, 'private_key' => $privateKey];
     }
 
     /**
@@ -298,6 +306,8 @@ class ComplianceCommand extends Command
 
     /**
      * Display validation errors from response.
+     *
+     * @param  array<string, mixed>  $response  ZATCA's JSON answer
      */
     protected function displayValidationErrors(array $response): void
     {

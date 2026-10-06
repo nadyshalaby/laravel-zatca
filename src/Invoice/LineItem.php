@@ -27,6 +27,7 @@ class LineItem implements LineItemInterface
 
     protected float $discount;
 
+    /** @var array<string, mixed> */
     protected array $identifiers;
 
     public function __construct(LineItemData $data)
@@ -50,6 +51,8 @@ class LineItem implements LineItemInterface
 
     /**
      * Create from array.
+     *
+     * @param  array<string, mixed>  $data
      */
     public static function fromArray(array $data, int $id = 1): self
     {

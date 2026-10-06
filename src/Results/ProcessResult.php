@@ -92,6 +92,8 @@ class ProcessResult
 
     /**
      * Get validation errors.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getErrors(): array
     {
@@ -100,6 +102,8 @@ class ProcessResult
 
     /**
      * Get validation warnings.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getWarnings(): array
     {
@@ -108,6 +112,8 @@ class ProcessResult
 
     /**
      * Convert to array.
+     *
+     * @return array{success: bool, process_type: string, uuid: string, invoice_number: string, qr_code: string|null, errors: array<int, array<string, mixed>>, warnings: array<int, array<string, mixed>>}
      */
     public function toArray(): array
     {

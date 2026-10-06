@@ -3,6 +3,7 @@
 namespace Corecave\Zatca\Xml;
 
 use Corecave\Zatca\Contracts\InvoiceInterface;
+use Corecave\Zatca\Exceptions\ZatcaException;
 use DOMDocument;
 use DOMElement;
 
@@ -69,7 +70,7 @@ class UblGenerator
         // Add invoice lines
         (new UblLineWriter($this->elements))->addInvoiceLines($root, $invoice);
 
-        return $this->doc->saveXML();
+        return $this->savedXml($this->doc);
     }
 
     /**
@@ -308,7 +309,23 @@ class UblGenerator
             $qrNodes->item(0)->nodeValue = $qrCode;
         }
 
-        return $doc->saveXML();
+        return $this->savedXml($doc);
+    }
+
+    /**
+     * The document as XML text.
+     *
+     * @throws ZatcaException
+     */
+    protected function savedXml(DOMDocument $doc): string
+    {
+        $xml = $doc->saveXML();
+
+        if ($xml === false) {
+            throw ZatcaException::withContext('Failed to write the invoice XML');
+        }
+
+        return $xml;
     }
 
     /**

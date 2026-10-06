@@ -4,6 +4,7 @@ namespace Corecave\Zatca\Certificate;
 
 use Corecave\Zatca\Exceptions\CertificateException;
 use OpenSSLAsymmetricKey;
+use OpenSSLCertificateSigningRequest;
 use phpseclib3\Crypt\Common\PublicKey;
 use phpseclib3\Crypt\EC;
 use phpseclib3\Exception\NoKeyLoadedException;
@@ -11,6 +12,7 @@ use phpseclib3\File\X509;
 
 class CsrGenerator
 {
+    /** @var array<string, mixed> */
     protected array $config;
 
     /**
@@ -18,6 +20,9 @@ class CsrGenerator
      */
     private const ZATCA_TEMPLATE_NAME = 'ZATCA-Code-Signing';
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(array $config = [])
     {
         $this->config = $config;
@@ -26,6 +31,7 @@ class CsrGenerator
     /**
      * Generate a CSR and private key for ZATCA onboarding.
      *
+     * @param  array<string, mixed>|null  $config
      * @return array{csr: string, private_key: string, public_key: string}
      *
      * @throws CertificateException
@@ -61,18 +67,9 @@ class CsrGenerator
 
         try {
             $privateKeyResource = $this->createPrivateKey($configFile);
+            $keyPair = $this->exportKeyPair($privateKeyResource);
 
-            // Export private key
-            openssl_pkey_export($privateKeyResource, $privateKey);
-
-            // Get public key
-            $keyDetails = openssl_pkey_get_details($privateKeyResource);
-
-            return [
-                'csr' => $this->createCsr($config, $privateKeyResource, $configFile),
-                'private_key' => $privateKey,
-                'public_key' => $keyDetails['key'],
-            ];
+            return ['csr' => $this->createCsr($config, $privateKeyResource, $configFile)] + $keyPair;
         } finally {
             if (is_file($configFile)) {
                 unlink($configFile);
@@ -101,6 +98,24 @@ class CsrGenerator
     }
 
     /**
+     * The private key and its public half, both as PEM.
+     *
+     * @return array{private_key: string, public_key: string}
+     *
+     * @throws CertificateException
+     */
+    protected function exportKeyPair(OpenSSLAsymmetricKey $privateKey): array
+    {
+        $keyDetails = openssl_pkey_get_details($privateKey);
+
+        if (! openssl_pkey_export($privateKey, $privateKeyPem) || $keyDetails === false) {
+            throw CertificateException::withContext('Failed to export the key pair: '.openssl_error_string());
+        }
+
+        return ['private_key' => $privateKeyPem, 'public_key' => $keyDetails['key']];
+    }
+
+    /**
      * Generate the CSR for the configured subject, signed with the private key, as PEM.
      *
      * @param  array<string, mixed>  $config
@@ -123,18 +138,22 @@ class CsrGenerator
             ]
         );
 
-        if ($csrResource === false) {
+        if (! $csrResource instanceof OpenSSLCertificateSigningRequest) {
             throw CertificateException::withContext('Failed to generate CSR: '.openssl_error_string());
         }
 
         // Export CSR
-        openssl_csr_export($csrResource, $csr);
+        if (! openssl_csr_export($csrResource, $csr)) {
+            throw CertificateException::withContext('Failed to export CSR: '.openssl_error_string());
+        }
 
         return $csr;
     }
 
     /**
      * Build OpenSSL configuration for ZATCA-compliant CSR.
+     *
+     * @param  array<string, mixed>  $config
      */
     protected function buildOpensslConfig(array $config): string
     {
@@ -205,6 +224,7 @@ EOT;
     /**
      * Generate a CSR whose EGS serial number is built from the given parts.
      *
+     * @param  array<string, mixed>|null  $config
      * @return array{csr: string, private_key: string, public_key: string, serial_number: string}
      *
      * @throws CertificateException
@@ -222,6 +242,9 @@ EOT;
 
     /**
      * Build the Distinguished Name (DN) for the CSR.
+     *
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
      */
     protected function buildDistinguishedName(array $config): array
     {
@@ -235,6 +258,8 @@ EOT;
 
     /**
      * Validate the CSR configuration.
+     *
+     * @param  array<string, mixed>  $config
      *
      * @throws CertificateException
      */
@@ -277,6 +302,8 @@ EOT;
 
     /**
      * Parse and extract information from a CSR.
+     *
+     * @return array{subject: array<string, mixed>, public_key: string|null}
      */
     public function parse(string $csr): array
     {
@@ -287,11 +314,11 @@ EOT;
         }
 
         $publicKey = openssl_csr_get_public_key($csr);
-        $publicKeyDetails = openssl_pkey_get_details($publicKey);
+        $publicKeyDetails = $publicKey === false ? false : openssl_pkey_get_details($publicKey);
 
         return [
             'subject' => $csrResource,
-            'public_key' => $publicKeyDetails['key'] ?? null,
+            'public_key' => $publicKeyDetails === false ? null : $publicKeyDetails['key'],
         ];
     }
 
@@ -338,6 +365,8 @@ EOT;
 
     /**
      * Get the current configuration.
+     *
+     * @return array<string, mixed>
      */
     public function getConfig(): array
     {
@@ -346,6 +375,8 @@ EOT;
 
     /**
      * Set the configuration.
+     *
+     * @param  array<string, mixed>  $config
      */
     public function setConfig(array $config): self
     {

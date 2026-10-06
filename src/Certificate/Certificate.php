@@ -28,6 +28,7 @@ class Certificate implements CertificateInterface
 
     protected bool $active;
 
+    /** @var array<string, mixed> */
     protected array $metadata;
 
     private ?X509 $decoded = null;
@@ -58,6 +59,8 @@ class Certificate implements CertificateInterface
 
     /**
      * Create from ZATCA API response.
+     *
+     * @param  array<string, mixed>  $response  ZATCA's JSON answer
      */
     public static function fromApiResponse(array $response, string $privateKey, string $type = 'compliance'): self
     {
@@ -78,6 +81,8 @@ class Certificate implements CertificateInterface
 
     /**
      * Create from stored data.
+     *
+     * @param  array<string, mixed>  $data
      */
     public static function fromArray(array $data): self
     {
@@ -225,6 +230,9 @@ class Certificate implements CertificateInterface
         return base64_decode($this->getRawPublicKey());
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getMetadata(): array
     {
         return $this->metadata;
@@ -232,6 +240,8 @@ class Certificate implements CertificateInterface
 
     /**
      * Convert to array for storage.
+     *
+     * @return array{type: string, certificate: string, private_key: string, secret: string, request_id: string|null, issued_at: string|null, expires_at: string|null, is_active: bool, metadata: array<string, mixed>}
      */
     public function toArray(): array
     {

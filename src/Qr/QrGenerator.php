@@ -134,6 +134,8 @@ class QrGenerator
 
     /**
      * Decode QR code content.
+     *
+     * @return array<int, string>
      */
     public function decode(string $qrCode): array
     {
@@ -142,6 +144,8 @@ class QrGenerator
 
     /**
      * Get human-readable QR code content.
+     *
+     * @return list<array{tag: int, name: string, length: int, value: string}>
      */
     public function toHumanReadable(string $qrCode): array
     {
@@ -150,6 +154,8 @@ class QrGenerator
 
     /**
      * Validate QR code content.
+     *
+     * @return array{valid: bool, errors: list<string>, tags?: array<int, string>}
      */
     public function validate(string $qrCode, bool $isSimplified = false): array
     {

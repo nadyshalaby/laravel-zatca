@@ -88,6 +88,8 @@ interface CertificateInterface
 
     /**
      * Get certificate metadata.
+     *
+     * @return array<string, mixed>
      */
     public function getMetadata(): array;
 
@@ -117,4 +119,11 @@ interface CertificateInterface
      * Get raw public key in base64 format (for QR code Tag 8).
      */
     public function getRawPublicKey(): string;
+
+    /**
+     * The certificate as it is stored, its private key and secret in the clear.
+     *
+     * @return array{type: string, certificate: string, private_key: string, secret: string, request_id: string|null, issued_at: string|null, expires_at: string|null, is_active: bool, metadata: array<string, mixed>}
+     */
+    public function toArray(): array;
 }

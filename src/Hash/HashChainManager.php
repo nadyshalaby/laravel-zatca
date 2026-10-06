@@ -134,6 +134,8 @@ class HashChainManager
 
     /**
      * Verify the hash chain integrity.
+     *
+     * @return array{valid: bool, checked: int, errors: list<array{icv: int, uuid: string, error: string, expected: string, actual: string}>}
      */
     public function verifyChain(?int $fromIcv = null, ?int $toIcv = null): array
     {
@@ -194,6 +196,8 @@ class HashChainManager
 
     /**
      * Get hash chain statistics.
+     *
+     * @return array{total_invoices: int, pending: int, reported: int, cleared: int, rejected: int, last_icv: mixed, last_invoice_date: mixed}
      */
     public function getStatistics(): array
     {

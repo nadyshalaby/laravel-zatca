@@ -93,6 +93,8 @@ class GenerateCsrCommand extends Command
 
     /**
      * Gather configuration from options or interactively.
+     *
+     * @return array<string, mixed>
      */
     protected function gatherConfig(): array
     {
@@ -137,6 +139,8 @@ class GenerateCsrCommand extends Command
 
     /**
      * Save CSR and private key to files.
+     *
+     * @param  array{csr: string, private_key: string, public_key: string}  $result
      */
     protected function saveFiles(array $result): void
     {
@@ -160,6 +164,8 @@ class GenerateCsrCommand extends Command
 
     /**
      * Display CSR in terminal.
+     *
+     * @param  array{csr: string, private_key: string, public_key: string}  $result
      */
     protected function displayCsr(array $result): void
     {

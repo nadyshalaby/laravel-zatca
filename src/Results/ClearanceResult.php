@@ -12,6 +12,7 @@ class ClearanceResult
 
     protected ?string $qrCode;
 
+    /** @var array<string, mixed> */
     protected array $response;
 
     public function __construct(Submission $submission, string $clearedXml, ?string $qrCode)
@@ -58,6 +59,8 @@ class ClearanceResult
 
     /**
      * Get the ZATCA response.
+     *
+     * @return array<string, mixed>
      */
     public function getResponse(): array
     {
@@ -66,6 +69,8 @@ class ClearanceResult
 
     /**
      * Get validation errors.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getErrors(): array
     {
@@ -74,6 +79,8 @@ class ClearanceResult
 
     /**
      * Get validation warnings.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getWarnings(): array
     {
@@ -98,6 +105,8 @@ class ClearanceResult
 
     /**
      * Convert to array.
+     *
+     * @return array{success: bool, status: string, uuid: string, invoice_number: string, qr_code: string|null, errors: array<int, array<string, mixed>>, warnings: array<int, array<string, mixed>>}
      */
     public function toArray(): array
     {

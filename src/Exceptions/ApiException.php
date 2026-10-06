@@ -8,13 +8,15 @@ class ApiException extends ZatcaException
 {
     protected ?ResponseInterface $response = null;
 
+    /** @var array<array-key, mixed> */
     protected array $zatcaErrors = [];
 
+    /** @var array<array-key, mixed> */
     protected array $zatcaWarnings = [];
 
-    public function __construct(string $message = '', int $code = 0, ?ResponseInterface $response = null)
+    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, ?ResponseInterface $response = null)
     {
-        parent::__construct($message, $code);
+        parent::__construct($message, $code, $previous);
         $this->response = $response;
     }
 
@@ -28,6 +30,8 @@ class ApiException extends ZatcaException
 
     /**
      * Get ZATCA error messages.
+     *
+     * @return array<array-key, mixed>
      */
     public function getZatcaErrors(): array
     {
@@ -36,6 +40,8 @@ class ApiException extends ZatcaException
 
     /**
      * Get ZATCA warning messages.
+     *
+     * @return array<array-key, mixed>
      */
     public function getZatcaWarnings(): array
     {
@@ -44,11 +50,13 @@ class ApiException extends ZatcaException
 
     /**
      * Create from API response.
+     *
+     * @param  array<string, mixed>  $body
      */
     public static function fromResponse(ResponseInterface $response, array $body = []): static
     {
         $statusCode = $response->getStatusCode();
-        $exception = new static(static::messageFrom($body, $statusCode), $statusCode, $response);
+        $exception = new static(static::messageFrom($body, $statusCode), $statusCode, response: $response);
 
         $exception->zatcaErrors = static::errorsFrom($body);
         $exception->zatcaWarnings = $body['validationResults']['warningMessages']

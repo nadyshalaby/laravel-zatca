@@ -3,6 +3,7 @@
 namespace Corecave\Zatca\Models;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -15,7 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property Carbon|null $issued_at
  * @property Carbon|null $expires_at
  * @property bool $is_active
- * @property array|null $metadata
+ * @property array<string, mixed>|null $metadata
  * @property Carbon $created_at
  * @property Carbon $updated_at
  */
@@ -32,7 +33,7 @@ class ZatcaCertificate extends Model
     /**
      * The attributes that are mass assignable.
      *
-     * @var array<string>
+     * @var list<string>
      */
     protected $fillable = [
         'type',
@@ -61,7 +62,7 @@ class ZatcaCertificate extends Model
     /**
      * The attributes that should be hidden for serialization.
      *
-     * @var array<string>
+     * @var list<string>
      */
     protected $hidden = [
         'private_key',
@@ -70,32 +71,44 @@ class ZatcaCertificate extends Model
 
     /**
      * Scope for active certificates.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeActive($query)
+    public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
 
     /**
      * Scope for certificate type.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeOfType($query, string $type)
+    public function scopeOfType(Builder $query, string $type): Builder
     {
         return $query->where('type', $type);
     }
 
     /**
      * Scope for compliance certificates.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeCompliance($query)
+    public function scopeCompliance(Builder $query): Builder
     {
         return $query->where('type', 'compliance');
     }
 
     /**
      * Scope for production certificates.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeProduction($query)
+    public function scopeProduction(Builder $query): Builder
     {
         return $query->where('type', 'production');
     }

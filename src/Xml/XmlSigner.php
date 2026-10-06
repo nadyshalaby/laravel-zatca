@@ -5,8 +5,8 @@ namespace Corecave\Zatca\Xml;
 use Corecave\Zatca\Exceptions\ZatcaException;
 use DOMDocument;
 use DOMXPath;
+use phpseclib3\Crypt\Common\PrivateKey;
 use phpseclib3\Crypt\EC;
-use phpseclib3\Crypt\EC\PrivateKey;
 use phpseclib3\Crypt\EC\PublicKey;
 use phpseclib3\Exception\NoKeyLoadedException;
 use phpseclib3\File\X509;
@@ -127,10 +127,8 @@ class XmlSigner
      * Create ECDSA signature over the invoice hash.
      *
      * ZATCA signs the binary invoice hash directly with ECDSA.
-     *
-     * @param  PrivateKey  $privateKey
      */
-    protected function createSignature(string $invoiceHashBinary, $privateKey): string
+    protected function createSignature(string $invoiceHashBinary, PrivateKey $privateKey): string
     {
         // Sign the binary hash directly (phpseclib handles the signing)
         $signature = $privateKey->sign($invoiceHashBinary);
@@ -149,11 +147,11 @@ class XmlSigner
         $doc->loadXML($xml);
 
         // Replace the ds:Signature placeholder
-        $result = $doc->saveXML();
+        $saved = $doc->saveXML();
 
         $pattern = '/<ds:Signature[^>]*Id="signature"[^>]*>.*?<\/ds:Signature>|<ds:Signature[^>]*Id="signature"[^>]*\/>/s';
 
-        $result = preg_replace($pattern, $signatureXml, $result, 1);
+        $result = $saved === false ? null : preg_replace($pattern, $signatureXml, $saved, 1);
 
         if ($result === null) {
             throw ZatcaException::withContext('Failed to insert signature into XML');

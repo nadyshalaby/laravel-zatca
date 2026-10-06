@@ -4,6 +4,7 @@ namespace Corecave\Zatca\Xml;
 
 use Corecave\Zatca\Exceptions\ValidationException;
 use DOMDocument;
+use DOMElement;
 
 class XmlValidator
 {
@@ -64,6 +65,8 @@ class XmlValidator
 
     /**
      * Validate required elements.
+     *
+     * @return list<string>
      */
     protected function validateRequiredElements(DOMDocument $doc): array
     {
@@ -85,6 +88,8 @@ class XmlValidator
 
     /**
      * Validate invoice type code.
+     *
+     * @return list<string>
      */
     protected function validateInvoiceType(DOMDocument $doc): array
     {
@@ -93,7 +98,8 @@ class XmlValidator
 
         $typeCode = $xpath->query('//cbc:InvoiceTypeCode');
         if ($typeCode && $typeCode->length > 0) {
-            $code = $typeCode->item(0)->nodeValue;
+            $typeNode = $typeCode->item(0);
+            $code = $typeNode->nodeValue;
             $validCodes = ['388', '381', '383'];
 
             if (! in_array($code, $validCodes)) {
@@ -101,7 +107,7 @@ class XmlValidator
             }
 
             // Validate sub-type (name attribute)
-            $name = $typeCode->item(0)->getAttribute('name');
+            $name = $typeNode instanceof DOMElement ? $typeNode->getAttribute('name') : '';
             if (empty($name)) {
                 $errors[] = 'Invoice type code missing name attribute (sub-type)';
             }
@@ -112,6 +118,8 @@ class XmlValidator
 
     /**
      * Validate seller information.
+     *
+     * @return list<string>
      */
     protected function validateSeller(DOMDocument $doc): array
     {
@@ -146,6 +154,8 @@ class XmlValidator
 
     /**
      * Validate line items.
+     *
+     * @return list<string>
      */
     protected function validateLineItems(DOMDocument $doc): array
     {
@@ -161,7 +171,9 @@ class XmlValidator
         }
 
         foreach ($lines as $index => $line) {
-            array_push($errors, ...$this->validateLine($xpath, $line, $index + 1));
+            if ($line instanceof DOMElement) {
+                array_push($errors, ...$this->validateLine($xpath, $line, $index + 1));
+            }
         }
 
         return $errors;
@@ -188,6 +200,8 @@ class XmlValidator
 
     /**
      * Validate totals.
+     *
+     * @return list<string>
      */
     protected function validateTotals(DOMDocument $doc): array
     {
@@ -266,6 +280,8 @@ class XmlValidator
 
     /**
      * Get validation errors without throwing exception.
+     *
+     * @return array<array-key, string>
      */
     public function getErrors(string $xml): array
     {

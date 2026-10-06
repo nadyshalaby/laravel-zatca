@@ -4,8 +4,12 @@ namespace Corecave\Zatca\Exceptions;
 
 class ValidationException extends ZatcaException
 {
+    /** @var array<array-key, string> */
     protected array $errors = [];
 
+    /**
+     * @param  array<array-key, string>  $errors
+     */
     public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, array $errors = [])
     {
         parent::__construct($message, $code, $previous);
@@ -15,6 +19,8 @@ class ValidationException extends ZatcaException
 
     /**
      * Get validation errors.
+     *
+     * @return array<array-key, string>
      */
     public function getErrors(): array
     {
@@ -23,6 +29,8 @@ class ValidationException extends ZatcaException
 
     /**
      * Create exception from validation errors array.
+     *
+     * @param  array<array-key, string>  $errors
      */
     public static function fromErrors(array $errors, string $message = 'Invoice validation failed'): static
     {

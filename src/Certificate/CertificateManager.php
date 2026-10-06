@@ -13,8 +13,12 @@ use phpseclib3\File\X509;
 
 class CertificateManager
 {
+    /** @var array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string} */
     protected array $config;
 
+    /**
+     * @param  array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string}  $config
+     */
     public function __construct(array $config = [])
     {
         $this->config = $config;
@@ -96,6 +100,8 @@ class CertificateManager
 
     /**
      * Get certificates that are expiring soon.
+     *
+     * @return array<int, CertificateInterface>
      */
     public function getExpiringSoon(int $days = 30): array
     {
@@ -104,7 +110,7 @@ class CertificateManager
             ->where('expires_at', '<=', now()->addDays($days))
             ->get()
             ->map(fn ($model) => $this->modelToCertificate($model))
-            ->toArray();
+            ->all();
     }
 
     /**
@@ -161,7 +167,7 @@ class CertificateManager
 
         File::put(
             "{$path}/{$type}.json",
-            json_encode($data, JSON_PRETTY_PRINT)
+            json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)
         );
 
         return $certificate;

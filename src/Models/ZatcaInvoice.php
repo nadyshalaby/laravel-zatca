@@ -3,6 +3,8 @@
 namespace Corecave\Zatca\Models;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -18,7 +20,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $xml
  * @property string|null $signed_xml
  * @property string|null $qr_code
- * @property array|null $zatca_response
+ * @property array<string, mixed>|null $zatca_response
  * @property string|null $reference_id
  * @property float $total_amount
  * @property float $vat_amount
@@ -38,7 +40,7 @@ class ZatcaInvoice extends Model
     /**
      * The attributes that are mass assignable.
      *
-     * @var array<string>
+     * @var list<string>
      */
     protected $fillable = [
         'uuid',
@@ -72,64 +74,88 @@ class ZatcaInvoice extends Model
 
     /**
      * Scope for status.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeStatus($query, string $status)
+    public function scopeStatus(Builder $query, string $status): Builder
     {
         return $query->where('status', $status);
     }
 
     /**
      * Scope for pending invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopePending($query)
+    public function scopePending(Builder $query): Builder
     {
         return $query->where('status', 'pending');
     }
 
     /**
      * Scope for reported invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeReported($query)
+    public function scopeReported(Builder $query): Builder
     {
         return $query->where('status', 'reported');
     }
 
     /**
      * Scope for cleared invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeCleared($query)
+    public function scopeCleared(Builder $query): Builder
     {
         return $query->where('status', 'cleared');
     }
 
     /**
      * Scope for rejected invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeRejected($query)
+    public function scopeRejected(Builder $query): Builder
     {
         return $query->where('status', 'rejected');
     }
 
     /**
      * Scope for invoice type.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeOfType($query, string $type)
+    public function scopeOfType(Builder $query, string $type): Builder
     {
         return $query->where('type', $type);
     }
 
     /**
      * Scope for standard invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeStandard($query)
+    public function scopeStandard(Builder $query): Builder
     {
         return $query->where('type', 'standard');
     }
 
     /**
      * Scope for simplified invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeSimplified($query)
+    public function scopeSimplified(Builder $query): Builder
     {
         return $query->where('type', 'simplified');
     }
@@ -161,7 +187,7 @@ class ZatcaInvoice extends Model
     /**
      * Get the original invoice (for credit/debit notes).
      */
-    public function originalInvoice()
+    public function originalInvoice(): ?self
     {
         if ($this->reference_id === null) {
             return null;
@@ -172,14 +198,18 @@ class ZatcaInvoice extends Model
 
     /**
      * Get related credit/debit notes.
+     *
+     * @return Collection<int, self>
      */
-    public function relatedNotes()
+    public function relatedNotes(): Collection
     {
         return self::where('reference_id', $this->invoice_number)->get();
     }
 
     /**
      * Get validation errors from ZATCA response.
+     *
+     * @return array<array-key, mixed>
      */
     public function getValidationErrors(): array
     {
@@ -188,6 +218,8 @@ class ZatcaInvoice extends Model
 
     /**
      * Get validation warnings from ZATCA response.
+     *
+     * @return array<array-key, mixed>
      */
     public function getValidationWarnings(): array
     {
