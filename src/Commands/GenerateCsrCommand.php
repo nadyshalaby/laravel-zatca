@@ -9,6 +9,8 @@ use Illuminate\Support\Str;
 
 class GenerateCsrCommand extends Command
 {
+    use ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
@@ -58,7 +60,7 @@ class GenerateCsrCommand extends Command
 
             return self::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Failed to generate CSR: '.$e->getMessage());
+            $this->reportFailure('Failed to generate CSR: ', $e);
 
             return self::FAILURE;
         }

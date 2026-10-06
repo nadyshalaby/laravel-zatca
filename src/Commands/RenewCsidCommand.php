@@ -12,6 +12,8 @@ use Illuminate\Console\Command;
 
 class RenewCsidCommand extends Command
 {
+    use ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
@@ -58,7 +60,7 @@ class RenewCsidCommand extends Command
         try {
             $csrData = $csrGenerator->generate();
         } catch (\Exception $e) {
-            $this->error('Failed to generate CSR: '.$e->getMessage());
+            $this->reportFailure('Failed to generate CSR: ', $e);
 
             return self::FAILURE;
         }
@@ -121,7 +123,7 @@ class RenewCsidCommand extends Command
 
             return self::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Failed to renew CSID: '.$e->getMessage());
+            $this->reportFailure('Failed to renew CSID: ', $e);
 
             return self::FAILURE;
         }

@@ -365,7 +365,7 @@ class ZatcaManager
             ]);
         } catch (\Exception $e) {
             Log::error('ZATCA: Failed to get compliance CSID', ['error' => $e->getMessage()]);
-            throw CertificateException::csrGenerationFailed('Failed to get compliance CSID: '.$e->getMessage());
+            throw CertificateException::csidRequestFailed($e);
         }
 
         return $response;
@@ -376,18 +376,13 @@ class ZatcaManager
      */
     protected function certificateMatchesConfig(CertificateInterface $cert): bool
     {
-        try {
-            $configVat = config('zatca.csr.vat_number');
-            if (! $configVat) {
-                return true; // No config VAT to check against
-            }
-
-            return (new CertificateVatReader)->read($cert) === $configVat;
-        } catch (\Exception $e) {
-            Log::warning('ZATCA: Could not verify certificate VAT', ['error' => $e->getMessage()]);
-
-            return false;
+        $configVat = config('zatca.csr.vat_number');
+        if (! $configVat) {
+            return true; // No config VAT to check against
         }
+
+        // A text that is not a certificate names no VAT number, so it never matches
+        return (new CertificateVatReader)->read($cert) === $configVat;
     }
 
     /**

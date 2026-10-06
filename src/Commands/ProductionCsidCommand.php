@@ -10,6 +10,8 @@ use Illuminate\Console\Command;
 
 class ProductionCsidCommand extends Command
 {
+    use ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
@@ -53,7 +55,7 @@ class ProductionCsidCommand extends Command
 
             return self::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Failed to get Production CSID: '.$e->getMessage());
+            $this->reportFailure('Failed to get Production CSID: ', $e);
 
             if (str_contains($e->getMessage(), 'compliance')) {
                 $this->warn('Make sure you have completed all compliance checks.');

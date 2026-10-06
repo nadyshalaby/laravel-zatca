@@ -2,6 +2,8 @@
 
 namespace Corecave\Zatca\Qr;
 
+use Corecave\Zatca\Exceptions\ValidationException;
+
 /**
  * TLV (Tag-Length-Value) Encoder for ZATCA QR codes.
  *
@@ -81,6 +83,10 @@ class TlvEncoder
             [$length, $bytesRead] = $this->decodeLength($tlv, $offset);
             $offset += $bytesRead;
 
+            if ($offset + $length > $tlvLength) {
+                throw ValidationException::malformedTlv("tag {$tag} runs past the end of the code");
+            }
+
             $value = substr($tlv, $offset, $length);
             $tags[$tag] = $value;
             $offset += $length;
@@ -96,6 +102,10 @@ class TlvEncoder
      */
     protected function decodeLength(string $data, int $offset): array
     {
+        if ($offset >= strlen($data)) {
+            throw ValidationException::malformedTlv('a tag has no length');
+        }
+
         $firstByte = ord($data[$offset]);
 
         if ($firstByte < 128) {
@@ -106,6 +116,10 @@ class TlvEncoder
         // Long form: first byte indicates number of length bytes
         $numLengthBytes = $firstByte & 0x7F;
         $length = 0;
+
+        if ($offset + 1 + $numLengthBytes > strlen($data)) {
+            throw ValidationException::malformedTlv('a length runs past the end of the code');
+        }
 
         for ($i = 0; $i < $numLengthBytes; $i++) {
             $length = ($length << 8) | ord($data[$offset + 1 + $i]);
@@ -124,7 +138,7 @@ class TlvEncoder
 
             // Phase 2 requires 9 tags
             return count($tags) >= 5;
-        } catch (\Exception $e) {
+        } catch (ValidationException $e) {
             return false;
         }
     }

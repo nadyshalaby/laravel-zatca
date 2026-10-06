@@ -6,8 +6,9 @@ use Carbon\Carbon;
 use Carbon\Exceptions\InvalidFormatException;
 use Corecave\Zatca\Contracts\CertificateInterface;
 use Corecave\Zatca\Exceptions\CertificateException;
-use phpseclib3\Crypt\EC;
+use phpseclib3\Crypt\Common\PublicKey;
 use phpseclib3\File\X509;
+use phpseclib3\Math\BigInteger;
 
 class Certificate implements CertificateInterface
 {
@@ -28,6 +29,11 @@ class Certificate implements CertificateInterface
     protected bool $active;
 
     protected array $metadata;
+
+    private ?X509 $decoded = null;
+
+    /** @var array<string, mixed>|null */
+    private ?array $decodedFields = null;
 
     public function __construct(
         CertificateOrigin $origin,
@@ -198,17 +204,13 @@ class Certificate implements CertificateInterface
 
     public function getPublicKey(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        $publicKey = $this->decoded()->getPublicKey();
 
-            return $x509->getPublicKey()->toString('PKCS8');
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
-            $key = EC::loadPrivateKey($this->privateKey);
-
-            return $key->getPublicKey()->toString('PKCS8');
+        if (! $publicKey instanceof PublicKey) {
+            throw CertificateException::unreadable();
         }
+
+        return $publicKey->toString('PKCS8');
     }
 
     /**
@@ -219,38 +221,7 @@ class Certificate implements CertificateInterface
      */
     public function getPublicKeyRaw(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
-
-            // Get PKCS8 PEM and extract DER bytes
-            $pemKey = $x509->getPublicKey()->toString('PKCS8');
-
-            // Extract DER from PEM
-            $pemKey = str_replace(
-                ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
-                '',
-                $pemKey
-            );
-
-            return base64_decode($pemKey);
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
-            try {
-                $key = EC::loadPrivateKey($this->privateKey);
-                $pemKey = $key->getPublicKey()->toString('PKCS8');
-
-                $pemKey = str_replace(
-                    ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
-                    '',
-                    $pemKey
-                );
-
-                return base64_decode($pemKey);
-            } catch (\Exception $e) {
-                return '';
-            }
-        }
+        return base64_decode($this->getRawPublicKey());
     }
 
     public function getMetadata(): array
@@ -322,36 +293,26 @@ class Certificate implements CertificateInterface
 
     /**
      * Get certificate subject information.
+     *
+     * @return array<string, mixed>
      */
     public function getSubject(): array
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        $subject = $this->decoded()->getDN(X509::DN_ARRAY);
 
-            return $x509->getDN(X509::DN_HASH);
-        } catch (\Exception $e) {
-            return [];
-        }
+        return is_array($subject) ? $subject : throw CertificateException::unreadable();
     }
 
     /**
      * Get certificate issuer information.
+     *
+     * @return array<string, mixed>
      */
     public function getIssuer(): array
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $issuer = $this->decodedFields()['tbsCertificate']['issuer'] ?? null;
 
-            if ($certData && isset($certData['tbsCertificate']['issuer'])) {
-                return $certData['tbsCertificate']['issuer'];
-            }
-
-            return [];
-        } catch (\Exception $e) {
-            return [];
-        }
+        return is_array($issuer) ? $issuer : throw CertificateException::unreadable();
     }
 
     /**
@@ -359,18 +320,9 @@ class Certificate implements CertificateInterface
      */
     public function getSerialNumber(): ?string
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $serialNumber = $this->decodedFields()['tbsCertificate']['serialNumber'] ?? null;
 
-            if ($certData && isset($certData['tbsCertificate']['serialNumber'])) {
-                return $certData['tbsCertificate']['serialNumber']->toString();
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            return null;
-        }
+        return $serialNumber instanceof BigInteger ? $serialNumber->toString() : throw CertificateException::unreadable();
     }
 
     /**
@@ -384,20 +336,11 @@ class Certificate implements CertificateInterface
      */
     public function getCertificateSignature(): string
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $signature = $this->decodedFields()['signature'] ?? null;
 
-            if ($certData && isset($certData['signature'])) {
-                // phpseclib returns the signature as a binary string (BIT STRING contents)
-                // The first byte is the unused bits indicator - remove it
-                return substr($certData['signature'], 1);
-            }
-
-            return '';
-        } catch (\Exception $e) {
-            return '';
-        }
+        // phpseclib returns the signature as a binary string (BIT STRING contents)
+        // The first byte is the unused bits indicator - remove it
+        return is_string($signature) ? substr($signature, 1) : throw CertificateException::unreadable();
     }
 
     /**
@@ -412,28 +355,20 @@ class Certificate implements CertificateInterface
      */
     public function getFormattedIssuer(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        // Get issuer DN as string - phpseclib returns in correct format
+        $issuerDn = $this->decoded()->getIssuerDN(X509::DN_STRING);
 
-            // Get issuer DN as string - phpseclib returns in correct format
-            $issuerDn = $x509->getIssuerDN(X509::DN_STRING);
-
-            // Replace OID for domainComponent with DC if needed
-            // Keep the ", " separators (do NOT remove spaces!)
-            $issuerDn = str_replace('0.9.2342.19200300.100.1.25', 'DC', $issuerDn);
-
-            // phpseclib may use "/" as separator - convert to ", "
-            if (str_contains($issuerDn, '/')) {
-                $issuerDn = str_replace('/', ', ', $issuerDn);
-            }
-
-            // Ensure ", " separator format (comma + space)
-            // Do NOT reverse the order - keep as-is from certificate
-            return $issuerDn;
-        } catch (\Exception $e) {
-            return '';
+        if (! is_string($issuerDn)) {
+            throw CertificateException::unreadable();
         }
+
+        // Replace OID for domainComponent with DC if needed
+        // Keep the ", " separators (do NOT remove spaces!)
+        $issuerDn = str_replace('0.9.2342.19200300.100.1.25', 'DC', $issuerDn);
+
+        // phpseclib may use "/" as separator - convert to ", "
+        // Do NOT reverse the order - keep as-is from certificate
+        return str_replace('/', ', ', $issuerDn);
     }
 
     /**
@@ -467,32 +402,46 @@ class Certificate implements CertificateInterface
      */
     public function getRawPublicKey(): string
     {
-        try {
+        // Remove PEM headers and line breaks
+        return str_replace(
+            ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
+            '',
+            $this->getPublicKey()
+        );
+    }
+
+    /**
+     * The certificate decoded once, for every getter that reads it.
+     *
+     * @throws CertificateException when the text is not a certificate, with the cause where there is one
+     */
+    protected function decoded(): X509
+    {
+        if ($this->decoded === null) {
             $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
 
-            $pemKey = $x509->getPublicKey()->toString('PKCS8');
-
-            // Remove PEM headers and line breaks
-            return str_replace(
-                ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
-                '',
-                $pemKey
-            );
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
             try {
-                $key = EC::loadPrivateKey($this->privateKey);
-                $pemKey = $key->getPublicKey()->toString('PKCS8');
-
-                return str_replace(
-                    ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
-                    '',
-                    $pemKey
-                );
+                $fields = $x509->loadX509($this->getCertificatePem());
             } catch (\Exception $e) {
-                return '';
+                throw CertificateException::unreadable($e);
             }
+
+            $this->decodedFields = is_array($fields) ? $fields : throw CertificateException::unreadable();
+            $this->decoded = $x509;
         }
+
+        return $this->decoded;
+    }
+
+    /**
+     * The decoded certificate's fields, as phpseclib maps them.
+     *
+     * @return array<string, mixed>
+     */
+    protected function decodedFields(): array
+    {
+        $this->decoded();
+
+        return $this->decodedFields ?? throw CertificateException::unreadable();
     }
 }

@@ -13,6 +13,8 @@ use Illuminate\Console\Command;
 
 class ComplianceCommand extends Command
 {
+    use ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
@@ -58,7 +60,7 @@ class ComplianceCommand extends Command
             $this->components->twoColumnDetail('Request ID', $response['requestID'] ?? 'N/A');
             $this->newLine();
         } catch (\Exception $e) {
-            $this->error('Failed to get Compliance CSID: '.$e->getMessage());
+            $this->reportFailure('Failed to get Compliance CSID: ', $e);
 
             return self::FAILURE;
         }
@@ -190,7 +192,7 @@ class ComplianceCommand extends Command
                     $failed++;
                 }
             } catch (\Exception $e) {
-                $this->error("    ERROR: {$e->getMessage()}");
+                $this->reportFailure('    ERROR: ', $e);
                 $failed++;
             }
         }

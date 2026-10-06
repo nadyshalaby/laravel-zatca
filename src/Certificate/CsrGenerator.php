@@ -4,6 +4,10 @@ namespace Corecave\Zatca\Certificate;
 
 use Corecave\Zatca\Exceptions\CertificateException;
 use OpenSSLAsymmetricKey;
+use phpseclib3\Crypt\Common\PublicKey;
+use phpseclib3\Crypt\EC;
+use phpseclib3\Exception\NoKeyLoadedException;
+use phpseclib3\File\X509;
 
 class CsrGenerator
 {
@@ -292,29 +296,26 @@ EOT;
     }
 
     /**
-     * Verify that a private key matches a CSR.
+     * Verify that a private key matches a CSR: the CSR carries the public half of this very key.
      */
     public function verifyKeyPair(string $csr, string $privateKey): bool
     {
-        try {
-            $csrPublicKey = openssl_csr_get_public_key($csr);
-            if ($csrPublicKey === false) {
-                return false;
-            }
+        $request = new X509;
 
-            $csrKeyDetails = openssl_pkey_get_details($csrPublicKey);
-            $privateKeyResource = openssl_pkey_get_private($privateKey);
-
-            if ($privateKeyResource === false) {
-                return false;
-            }
-
-            $privateKeyDetails = openssl_pkey_get_details($privateKeyResource);
-
-            return $csrKeyDetails['key'] === $privateKeyDetails['key'];
-        } catch (\Exception $e) {
+        if ($request->loadCSR($csr) === false) {
             return false;
         }
+
+        $requestPublicKey = $request->getPublicKey();
+
+        try {
+            $keyPublicKey = EC::loadPrivateKey($privateKey)->getPublicKey();
+        } catch (NoKeyLoadedException $e) {
+            return false;
+        }
+
+        return $requestPublicKey instanceof PublicKey
+            && hash_equals($requestPublicKey->toString('PKCS8'), $keyPublicKey->toString('PKCS8'));
     }
 
     /**

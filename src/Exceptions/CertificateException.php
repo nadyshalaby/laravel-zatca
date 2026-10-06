@@ -37,6 +37,22 @@ class CertificateException extends ZatcaException
     }
 
     /**
+     * ZATCA did not hand a compliance CSID over for the request.
+     */
+    public static function csidRequestFailed(\Throwable $cause): static
+    {
+        return new static("Failed to get compliance CSID: {$cause->getMessage()}", 0, $cause);
+    }
+
+    /**
+     * The text is not a certificate that can be read.
+     */
+    public static function unreadable(?\Throwable $cause = null): static
+    {
+        return new static('Invalid certificate: it cannot be read', 0, $cause);
+    }
+
+    /**
      * The certificate decodes, but its expiry date does not.
      */
     public static function unreadableExpiry(?\Throwable $cause = null): static

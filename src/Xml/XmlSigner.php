@@ -8,6 +8,7 @@ use DOMXPath;
 use phpseclib3\Crypt\EC;
 use phpseclib3\Crypt\EC\PrivateKey;
 use phpseclib3\Crypt\EC\PublicKey;
+use phpseclib3\Exception\NoKeyLoadedException;
 use phpseclib3\File\X509;
 
 class XmlSigner
@@ -440,7 +441,7 @@ class XmlSigner
                 base64_decode($storedDigest),
                 base64_decode($signatureValue)
             );
-        } catch (\Exception $e) {
+        } catch (NoKeyLoadedException $e) {
             return false;
         }
     }
