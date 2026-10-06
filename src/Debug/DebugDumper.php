@@ -13,6 +13,11 @@ use Illuminate\Support\Facades\File;
 class DebugDumper
 {
     /**
+     * What dump() writes after an invoice's id, one ending per kind of file.
+     */
+    private const FILE_ENDINGS = ['unsigned.xml', 'signed.xml', 'qr.txt', 'qr_decoded.json', 'qr_decode_error.txt', 'hash.txt'];
+
+    /**
      * The names of the nine QR code tags, as the decoded QR file shows them.
      */
     private const QR_TAG_NAMES = [
@@ -175,13 +180,20 @@ class DebugDumper
     }
 
     /**
-     * List all debug files for an invoice.
+     * List all debug files for an invoice: its id, the stamp when files are stamped, then one of the endings dump() writes.
+     *
+     * @return list<string>
      */
     public function listFiles(string $invoiceId): array
     {
-        $pattern = $this->basePath.'/'.$this->sanitizeFilename($invoiceId).'*';
+        $id = $this->sanitizeFilename($invoiceId);
+        $endings = implode('|', array_map(fn (string $ending): string => preg_quote($ending, '/'), self::FILE_ENDINGS));
+        $ownName = '/^'.preg_quote($id, '/').'(_\d{8}_\d{6})?_('.$endings.')$/';
 
-        return glob($pattern) ?: [];
+        return array_values(array_filter(
+            glob($this->basePath.'/'.$id.'_*') ?: [],
+            fn (string $path): bool => preg_match($ownName, basename($path)) === 1,
+        ));
     }
 
     /**
