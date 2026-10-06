@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property int $id
+ * @property string $device_id
  * @property string $uuid
  * @property int $icv
  * @property string $invoice_number
@@ -43,6 +44,7 @@ class ZatcaInvoice extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'device_id',
         'uuid',
         'icv',
         'invoice_number',

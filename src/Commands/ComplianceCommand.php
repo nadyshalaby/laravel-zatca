@@ -6,19 +6,22 @@ use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Client\ZatcaClient;
 use Corecave\Zatca\Contracts\InvoiceInterface;
+use Corecave\Zatca\Hash\HashChainManager;
 use Corecave\Zatca\Invoice\ComplianceSample;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Xml\InvoiceSigner;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 class ComplianceCommand extends Command
 {
-    use ReportsFailures;
+    use AsksForOtp, ChoosesDevice, ReportsFailures;
 
     /**
      * The name and signature of the console command.
      */
     protected $signature = 'zatca:compliance
+                            {--device= : The ZATCA device being onboarded}
                             {--otp= : OTP from FATOORA portal}
                             {--csr= : Path to CSR file}
                             {--private-key= : Path to private key file}
@@ -36,12 +39,13 @@ class ComplianceCommand extends Command
     {
         $this->info('Starting ZATCA Compliance Process...');
         $this->newLine();
+        $certManager = $this->deviceCertificates($certManager);
 
-        // Get OTP
-        $otp = $this->option('otp');
-        if (empty($otp)) {
-            $otp = $this->ask('Enter OTP from FATOORA portal');
+        if ($certManager === null) {
+            return self::FAILURE;
         }
+
+        $otp = $this->otp();
 
         // Get or generate CSR
         $csrData = $this->getCsrData();
@@ -213,6 +217,19 @@ class ComplianceCommand extends Command
     }
 
     /**
+     * Where the device's chain stands, for its samples: its next counter and its previous hash, read under its
+     * lock and let go at once, since a sample is never recorded in the chain.
+     *
+     * @return array{0: int, 1: string}
+     */
+    protected function chainPosition(): array
+    {
+        $chain = app(HashChainManager::class)->forDevice((string) $this->deviceId);
+
+        return DB::transaction(fn (): array => [$chain->getNextIcv(), $chain->getPreviousInvoiceHash()]);
+    }
+
+    /**
      * The sample invoices the configured invoice types call for.
      *
      * @return list<array{type: string, subtype: string}>
@@ -247,8 +264,11 @@ class ComplianceCommand extends Command
      */
     protected function buildSampleInvoice(array $sample, int $number): InvoiceInterface
     {
+        $position = $this->chainPosition();
         $builder = $this->sampleBuilder($sample);
-        $builder->setInvoiceNumber("SME0000{$number}");
+        $builder->setInvoiceNumber("SME0000{$number}")
+            ->setIcv($position[0])
+            ->setPreviousInvoiceHash($position[1]);
 
         // Add buyer for standard invoices
         if ($sample['type'] !== 'simplified') {

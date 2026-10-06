@@ -10,12 +10,13 @@ use Illuminate\Console\Command;
 
 class ProductionCsidCommand extends Command
 {
-    use ReportsFailures;
+    use ChoosesDevice, ReportsFailures;
 
     /**
      * The name and signature of the console command.
      */
     protected $signature = 'zatca:production-csid
+                            {--device= : The ZATCA device the production certificate is for}
                             {--request-id= : Compliance request ID (if not stored)}';
 
     /**
@@ -30,8 +31,12 @@ class ProductionCsidCommand extends Command
     {
         $this->info('Requesting Production CSID...');
         $this->newLine();
+        $certManager = $this->deviceCertificates($certManager);
 
-        // Get compliance certificate
+        if ($certManager === null) {
+            return self::FAILURE;
+        }
+
         $complianceCert = $certManager->getActive('compliance');
 
         if (! $complianceCert) {
@@ -41,7 +46,14 @@ class ProductionCsidCommand extends Command
             return self::FAILURE;
         }
 
-        // Get request ID
+        return $this->requestProduction($certManager, $client, $complianceCert);
+    }
+
+    /**
+     * Ask ZATCA for the production certificate under the compliance one's request id, and store it as the device's.
+     */
+    protected function requestProduction(CertificateManager $certManager, ZatcaClient $client, CertificateInterface $complianceCert): int
+    {
         $requestId = $this->complianceRequestId($complianceCert);
 
         $this->components->twoColumnDetail('Compliance Request ID', $requestId);

@@ -2,50 +2,59 @@
 
 namespace Corecave\Zatca\Hash;
 
+use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Models\ZatcaInvoice;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+/**
+ * A device's invoice counter and hash chain. The manager the container holds belongs to no device:
+ * `forDevice()` gives the chain of the device that signs, and reading or writing a chain before that is
+ * refused.
+ */
 class HashChainManager
 {
+    private ?string $deviceId = null;
+
     public function __construct(private readonly HashChainLock $lock = new HashChainLock) {}
 
     /**
-     * Get the next Invoice Counter Value (ICV).
-     * This must be atomic and sequential.
+     * The chain of one device: its counter, its hashes and its lock.
      */
-    public function getNextIcv(): int
+    public function forDevice(string $deviceId): static
     {
-        return DB::transaction(function () {
-            // PostgreSQL doesn't support FOR UPDATE with aggregate functions.
-            // Lock the table to ensure atomicity, then get max ICV.
-            $driver = DB::connection()->getDriverName();
+        $chain = clone $this;
+        $chain->deviceId = $deviceId;
 
-            if ($driver === 'pgsql') {
-                // One advisory lock per workshop schema, so workshops never wait for each other
-                $this->lock->acquire(DB::connection());
-            }
-
-            $maxIcv = ZatcaInvoice::max('icv');
-
-            return ($maxIcv ?? 0) + 1;
-        });
+        return $chain;
     }
 
     /**
-     * Get the Previous Invoice Hash (PIH).
-     * Returns the hash of the most recently generated invoice.
+     * The device's next Invoice Counter Value (ICV), under the device's lock. The lock is held until the
+     * caller's transaction ends, so that transaction must also record the invoice: no other issue of the
+     * device can take the same counter or read the hash before it.
+     *
+     * @throws InvoiceException when no device is chosen or no transaction is open
+     */
+    public function getNextIcv(): int
+    {
+        $this->lock->acquire(DB::connection(), $this->device());
+
+        return (int) $this->invoices()->max('icv') + 1;
+    }
+
+    /**
+     * The device's Previous Invoice Hash (PIH): the hash of its invoice with the highest counter, or the
+     * initial hash before its first.
+     *
+     * @throws InvoiceException when no device is chosen
      */
     public function getPreviousInvoiceHash(): string
     {
-        $lastInvoice = ZatcaInvoice::orderBy('icv', 'desc')->first();
+        $hash = $this->invoices()->orderByDesc('icv')->value('hash');
 
-        if (! $lastInvoice || empty($lastInvoice->hash)) {
-            return $this->getInitialHash();
-        }
-
-        return $lastInvoice->hash;
+        return is_string($hash) && $hash !== '' ? $hash : $this->getInitialHash();
     }
 
     /**
@@ -66,11 +75,14 @@ class HashChainManager
     }
 
     /**
-     * Record an invoice in the hash chain.
+     * Record an invoice in the device's hash chain.
+     *
+     * @throws InvoiceException when no device is chosen
      */
     public function recordInvoice(InvoiceRecord $record): ZatcaInvoice
     {
         return ZatcaInvoice::create([
+            'device_id' => $this->device(),
             'uuid' => $record->uuid,
             'icv' => $record->icv,
             'invoice_number' => $record->invoiceNumber,
@@ -133,7 +145,7 @@ class HashChainManager
     }
 
     /**
-     * Verify the hash chain integrity.
+     * Verify the device's hash chain.
      *
      * @return array{valid: bool, checked: int, errors: list<array{icv: int, uuid: string, error: string, expected: string, actual: string}>}
      */
@@ -177,7 +189,7 @@ class HashChainManager
             return $this->getInitialHash();
         }
 
-        $hash = ZatcaInvoice::where('icv', '<', $fromIcv)->orderByDesc('icv')->value('hash');
+        $hash = $this->invoices()->where('icv', '<', $fromIcv)->orderByDesc('icv')->value('hash');
 
         return $hash ?? $this->getInitialHash();
     }
@@ -189,26 +201,26 @@ class HashChainManager
      */
     protected function invoicesBetween(?int $fromIcv, ?int $toIcv): Builder
     {
-        return ZatcaInvoice::query()
+        return $this->invoices()
             ->when($fromIcv !== null, fn (Builder $query) => $query->where('icv', '>=', $fromIcv))
             ->when($toIcv !== null, fn (Builder $query) => $query->where('icv', '<=', $toIcv));
     }
 
     /**
-     * Get hash chain statistics.
+     * The device's chain statistics.
      *
      * @return array{total_invoices: int, pending: int, reported: int, cleared: int, rejected: int, last_icv: mixed, last_invoice_date: mixed}
      */
     public function getStatistics(): array
     {
         return [
-            'total_invoices' => ZatcaInvoice::count(),
-            'pending' => ZatcaInvoice::where('status', 'pending')->count(),
-            'reported' => ZatcaInvoice::where('status', 'reported')->count(),
-            'cleared' => ZatcaInvoice::where('status', 'cleared')->count(),
-            'rejected' => ZatcaInvoice::where('status', 'rejected')->count(),
-            'last_icv' => ZatcaInvoice::max('icv') ?? 0,
-            'last_invoice_date' => ZatcaInvoice::max('created_at'),
+            'total_invoices' => $this->invoices()->count(),
+            'pending' => $this->invoices()->where('status', 'pending')->count(),
+            'reported' => $this->invoices()->where('status', 'reported')->count(),
+            'cleared' => $this->invoices()->where('status', 'cleared')->count(),
+            'rejected' => $this->invoices()->where('status', 'rejected')->count(),
+            'last_icv' => $this->invoices()->max('icv') ?? 0,
+            'last_invoice_date' => $this->invoices()->max('created_at'),
         ];
     }
 
@@ -222,10 +234,30 @@ class HashChainManager
     }
 
     /**
-     * Check if an ICV is already used.
+     * Whether the device has used the counter.
      */
     public function isIcvUsed(int $icv): bool
     {
-        return ZatcaInvoice::where('icv', $icv)->exists();
+        return $this->invoices()->where('icv', $icv)->exists();
+    }
+
+    /**
+     * The device's invoices.
+     *
+     * @return Builder<ZatcaInvoice>
+     *
+     * @throws InvoiceException when no device is chosen
+     */
+    protected function invoices(): Builder
+    {
+        return ZatcaInvoice::query()->where('device_id', $this->device());
+    }
+
+    /**
+     * @throws InvoiceException when no device is chosen
+     */
+    protected function device(): string
+    {
+        return $this->deviceId ?? throw InvoiceException::noDevice();
     }
 }

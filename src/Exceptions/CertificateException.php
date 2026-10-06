@@ -75,4 +75,12 @@ class CertificateException extends ZatcaException
     {
         return new static('The private key does not match the certificate.');
     }
+
+    /**
+     * A device's certificates read or stored before the device was chosen, so there is no set to use.
+     */
+    public static function noDevice(): static
+    {
+        return new static('Certificates belong to a device: choose it with forDevice() first.');
+    }
 }

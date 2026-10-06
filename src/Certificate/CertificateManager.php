@@ -11,10 +11,16 @@ use phpseclib3\Crypt\EC;
 use phpseclib3\Exception\NoKeyLoadedException;
 use phpseclib3\File\X509;
 
+/**
+ * A device's certificates. The manager the container holds belongs to no device: `forDevice()` gives the
+ * certificates of the device that signs, and storing or reading one before that is refused.
+ */
 class CertificateManager
 {
     /** @var array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string} */
     protected array $config;
+
+    private ?string $deviceId = null;
 
     /**
      * @param  array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string}  $config
@@ -25,7 +31,20 @@ class CertificateManager
     }
 
     /**
-     * Store a certificate.
+     * The certificates of one device.
+     */
+    public function forDevice(string $deviceId): static
+    {
+        $manager = clone $this;
+        $manager->deviceId = $deviceId;
+
+        return $manager;
+    }
+
+    /**
+     * Store a certificate as the device's active one of its type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function store(CertificateInterface $certificate): CertificateInterface
     {
@@ -39,7 +58,9 @@ class CertificateManager
     }
 
     /**
-     * Get the active certificate of a given type.
+     * The device's active certificate of a given type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function getActive(string $type = 'production'): ?CertificateInterface
     {
@@ -67,14 +88,16 @@ class CertificateManager
     }
 
     /**
-     * Deactivate all certificates of a type.
+     * Deactivate all the device's certificates of a type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function deactivateAll(string $type): void
     {
         $storage = $this->config['storage'] ?? 'database';
 
         if ($storage === 'database') {
-            ZatcaCertificate::where('type', $type)->update(['is_active' => false]);
+            ZatcaCertificate::where('device_id', $this->device())->where('type', $type)->update(['is_active' => false]);
         }
     }
 
@@ -125,6 +148,7 @@ class CertificateManager
         $data = $certificate->toArray();
         $data['private_key'] = Crypt::encryptString($data['private_key']);
         $data['secret'] = Crypt::encryptString($data['secret']);
+        $data['device_id'] = $this->device();
 
         $model = ZatcaCertificate::create($data);
 
@@ -136,7 +160,8 @@ class CertificateManager
      */
     protected function getFromDatabase(string $type): ?CertificateInterface
     {
-        $model = ZatcaCertificate::where('type', $type)
+        $model = ZatcaCertificate::where('device_id', $this->device())
+            ->where('type', $type)
             ->where('is_active', true)
             ->latest()
             ->first();
@@ -153,7 +178,7 @@ class CertificateManager
      */
     protected function storeToFile(CertificateInterface $certificate): CertificateInterface
     {
-        $path = $this->config['path'] ?? storage_path('zatca/certificates');
+        $path = $this->deviceFolder();
         $type = $certificate->getType();
 
         if (! File::isDirectory($path)) {
@@ -178,8 +203,7 @@ class CertificateManager
      */
     protected function getFromFile(string $type): ?CertificateInterface
     {
-        $path = $this->config['path'] ?? storage_path('zatca/certificates');
-        $file = "{$path}/{$type}.json";
+        $file = "{$this->deviceFolder()}/{$type}.json";
 
         if (! File::exists($file)) {
             return null;
@@ -196,6 +220,24 @@ class CertificateManager
         $data['secret'] = Crypt::decryptString($data['secret']);
 
         return Certificate::fromArray($data);
+    }
+
+    /**
+     * The folder of the device's certificate files, one file per type.
+     *
+     * @throws CertificateException when no device is chosen
+     */
+    protected function deviceFolder(): string
+    {
+        return ($this->config['path'] ?? storage_path('zatca/certificates')).'/'.$this->device();
+    }
+
+    /**
+     * @throws CertificateException when no device is chosen
+     */
+    protected function device(): string
+    {
+        return $this->deviceId ?? throw CertificateException::noDevice();
     }
 
     /**

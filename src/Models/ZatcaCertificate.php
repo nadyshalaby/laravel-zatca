@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property int $id
+ * @property string $device_id
  * @property string $type
  * @property string $certificate
  * @property string $private_key
@@ -36,6 +37,7 @@ class ZatcaCertificate extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'device_id',
         'type',
         'certificate',
         'private_key',

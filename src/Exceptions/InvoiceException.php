@@ -99,4 +99,12 @@ class InvoiceException extends ZatcaException
     {
         return new static('The invoice hash chain lock needs a current database schema, and the connection has none.');
     }
+
+    /**
+     * A device's chain read or written before the device was chosen, so there is no chain to use.
+     */
+    public static function noDevice(): static
+    {
+        return new static('The invoice hash chain belongs to a device: choose it with forDevice() first.');
+    }
 }

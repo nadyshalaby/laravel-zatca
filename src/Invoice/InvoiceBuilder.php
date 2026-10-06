@@ -8,7 +8,6 @@ use Corecave\Zatca\Enums\InvoiceSubType;
 use Corecave\Zatca\Enums\InvoiceType;
 use Corecave\Zatca\Enums\PaymentMethod;
 use Corecave\Zatca\Exceptions\InvoiceException;
-use Corecave\Zatca\Hash\HashChainManager;
 use Illuminate\Support\Str;
 
 class InvoiceBuilder
@@ -325,8 +324,8 @@ class InvoiceBuilder
         $data->subType = $this->subType;
         $data->issueDate = $this->issueDate;
         $data->seller = $this->seller;
-        $data->icv = $this->icv;
-        $data->previousInvoiceHash = $this->previousInvoiceHash;
+        $data->icv = $this->icv ?? throw InvoiceException::missingField('icv');
+        $data->previousInvoiceHash = $this->previousInvoiceHash ?? throw InvoiceException::missingField('previous_invoice_hash');
         $data->buyer = $this->buyer;
         $data->supplyDate = $this->supplyDate;
         $data->currency = $this->currency;
@@ -373,19 +372,6 @@ class InvoiceBuilder
             $this->seller = $this->sellerConfig;
         }
 
-        // Get ICV and PIH from hash chain manager if not set
-        if ($this->icv === null || $this->previousInvoiceHash === null) {
-            $hashManager = app(HashChainManager::class);
-
-            if ($this->icv === null) {
-                $this->icv = $hashManager->getNextIcv();
-            }
-
-            if ($this->previousInvoiceHash === null) {
-                $this->previousInvoiceHash = $hashManager->getPreviousInvoiceHash();
-            }
-        }
-
         // Set default sub-type based on flags
         if ($this->subType === null) {
             $this->subType = $this->determineSubType();
@@ -413,6 +399,15 @@ class InvoiceBuilder
     {
         if (empty($this->invoiceNumber)) {
             throw InvoiceException::missingField('invoice_number');
+        }
+
+        // The counter and the previous hash are the device's, taken in the issuing transaction
+        if ($this->icv === null) {
+            throw InvoiceException::missingField('icv');
+        }
+
+        if ($this->previousInvoiceHash === null) {
+            throw InvoiceException::missingField('previous_invoice_hash');
         }
 
         if (empty($this->seller)) {

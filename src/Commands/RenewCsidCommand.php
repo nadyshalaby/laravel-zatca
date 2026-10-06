@@ -12,12 +12,13 @@ use Illuminate\Console\Command;
 
 class RenewCsidCommand extends Command
 {
-    use ReportsFailures;
+    use AsksForOtp, ChoosesDevice, ReportsFailures;
 
     /**
      * The name and signature of the console command.
      */
     protected $signature = 'zatca:renew-csid
+                            {--device= : The ZATCA device whose certificate is renewed}
                             {--otp= : OTP from FATOORA portal}
                             {--force : Force renewal even if certificate is not expiring}';
 
@@ -33,8 +34,12 @@ class RenewCsidCommand extends Command
     {
         $this->info('ZATCA Production CSID Renewal');
         $this->newLine();
+        $certManager = $this->deviceCertificates($certManager);
 
-        // Get current production certificate
+        if ($certManager === null) {
+            return self::FAILURE;
+        }
+
         $currentCert = $certManager->getActive('production');
 
         if (! $currentCert) {
@@ -48,11 +53,7 @@ class RenewCsidCommand extends Command
             return self::SUCCESS;
         }
 
-        // Get OTP
-        $otp = $this->option('otp');
-        if (empty($otp)) {
-            $otp = $this->ask('Enter OTP from FATOORA portal');
-        }
+        $otp = $this->otp();
 
         // Generate new CSR
         $this->info('Generating new CSR...');

@@ -34,9 +34,23 @@ class ZatcaManager
 
     protected ?DebugDumper $debugDumper = null;
 
+    protected ?string $deviceId = null;
+
     public function __construct(Application $app)
     {
         $this->app = $app;
+    }
+
+    /**
+     * The manager for one device: its certificates and its invoice chain.
+     */
+    public function forDevice(string $deviceId): static
+    {
+        $manager = clone $this;
+        $manager->deviceId = $deviceId;
+        $manager->client = null;
+
+        return $manager;
     }
 
     /**
@@ -48,11 +62,13 @@ class ZatcaManager
     }
 
     /**
-     * Get the certificate manager.
+     * The certificate manager, for the device when one is chosen.
      */
     public function certificate(): CertificateManager
     {
-        return $this->app->make(CertificateManager::class);
+        $manager = $this->app->make(CertificateManager::class);
+
+        return $this->deviceId === null ? $manager : $manager->forDevice($this->deviceId);
     }
 
     /**
@@ -71,8 +87,8 @@ class ZatcaManager
         if ($this->client === null) {
             $this->client = $this->app->make(ApiClientInterface::class);
 
-            // Set the production certificate if available
-            $certificate = $this->certificate()->getActive('production');
+            // Set the device's production certificate if a device is chosen and has one
+            $certificate = $this->deviceId === null ? null : $this->certificate()->getActive('production');
             if ($certificate) {
                 $this->client->setCertificate($certificate);
             }
@@ -114,11 +130,13 @@ class ZatcaManager
     }
 
     /**
-     * Get the hash chain manager.
+     * The hash chain manager, for the device when one is chosen.
      */
     public function hashChain(): HashChainManager
     {
-        return $this->app->make(HashChainManager::class);
+        $chain = $this->app->make(HashChainManager::class);
+
+        return $this->deviceId === null ? $chain : $chain->forDevice($this->deviceId);
     }
 
     /**
