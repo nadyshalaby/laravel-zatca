@@ -15,8 +15,8 @@ This package supports Phase 2 requirements including:
 
 ## Requirements
 
-- PHP 8.1+
-- Laravel 10.x, 11.x, or 12.x
+- PHP 8.3+, which Laravel 13 needs
+- Laravel 13.x
 - OpenSSL extension
 - GMP extension (recommended for better performance)
 
