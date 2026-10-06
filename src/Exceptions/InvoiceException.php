@@ -37,6 +37,14 @@ class InvoiceException extends ZatcaException
     }
 
     /**
+     * A line whose discount is more than its quantity times its price, which would leave it a negative amount.
+     */
+    public static function discountExceedsLine(int $index, float $discount, float $gross): static
+    {
+        return static::invalidLineItem($index, sprintf('its discount of %.2F is more than its quantity times its price, %.2F', $discount, $gross));
+    }
+
+    /**
      * Invalid tax calculation.
      */
     public static function invalidTaxCalculation(string $reason): static

@@ -5,6 +5,7 @@ namespace Corecave\Zatca\Invoice;
 use Corecave\Zatca\Contracts\LineItemInterface;
 use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Enums\VatExemptionReason;
+use Corecave\Zatca\Exceptions\InvoiceException;
 
 class LineItem implements LineItemInterface
 {
@@ -40,6 +41,11 @@ class LineItem implements LineItemInterface
         $this->discount = $data->discount;
         $this->vatExemptionReason = $data->vatExemptionReason;
         $this->identifiers = $data->identifiers;
+
+        // Compared to the halala, so a float reading the line a hair short never refuses a discount of all of it
+        if (round($this->discount - $this->quantity * $this->unitPrice, 2) > 0) {
+            throw InvoiceException::discountExceedsLine($this->id, $this->discount, $this->quantity * $this->unitPrice);
+        }
     }
 
     /**
