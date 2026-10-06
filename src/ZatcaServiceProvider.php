@@ -49,7 +49,8 @@ class ZatcaServiceProvider extends ServiceProvider
         // interface or, as the commands do, by its class
         $this->app->singleton(ZatcaClient::class, function ($app) {
             return new ZatcaClient(
-                config('zatca.environment', 'sandbox')
+                config('zatca.environment', 'sandbox'),
+                $this->clientSettings()
             );
         });
         $this->app->singleton(ApiClientInterface::class, fn ($app) => $app->make(ZatcaClient::class));
@@ -125,6 +126,26 @@ class ZatcaServiceProvider extends ServiceProvider
                 RenewCsidCommand::class,
             ]);
         }
+    }
+
+    /**
+     * The client's HTTP settings and API version from the package config, typed as the client reads them:
+     * values set through the environment arrive as strings.
+     *
+     * @return array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
+     */
+    protected function clientSettings(): array
+    {
+        $http = config('zatca.http', []);
+
+        return [
+            'timeout' => (int) ($http['timeout'] ?? 30),
+            'connect_timeout' => (int) ($http['connect_timeout'] ?? 10),
+            'retries' => (int) ($http['retries'] ?? 3),
+            'retry_delay' => (int) ($http['retry_delay'] ?? 1000),
+            'verify_ssl' => filter_var($http['verify_ssl'] ?? true, FILTER_VALIDATE_BOOL),
+            'api_version' => (string) config('zatca.api_version', 'V2'),
+        ];
     }
 
     /**

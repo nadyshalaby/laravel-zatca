@@ -198,6 +198,16 @@ class ZatcaClient implements ApiClientInterface
     }
 
     /**
+     * The settings the client was built with: its timeouts, retries, SSL check and API version.
+     *
+     * @return array<string, mixed>
+     */
+    public function getConfig(): array
+    {
+        return $this->config;
+    }
+
+    /**
      * Get authentication headers.
      */
     protected function getAuthHeaders(): array
@@ -314,8 +324,11 @@ class ZatcaClient implements ApiClientInterface
     protected function retryDelay(): callable
     {
         return function (int $retries): int {
-            // Exponential backoff
-            return $this->config['retry_delay'] * (2 ** $retries);
+            // Exponential backoff, with up to half of it again at random so clients that failed together
+            // do not all come back in the same millisecond
+            $backoff = $this->config['retry_delay'] * (2 ** $retries);
+
+            return $backoff + random_int(0, intdiv($backoff, 2));
         };
     }
 
