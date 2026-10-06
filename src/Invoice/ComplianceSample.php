@@ -11,13 +11,32 @@ class ComplianceSample
 {
     public const INVOICE_NUMBER = 'SME00001';
 
+    /**
+     * One line priced as Syanat prices: 1 × 100.00, no discount, 15% VAT rounded once from the net.
+     */
     public const LINE_ITEM = [
         'name' => 'Sample Item',
-        'quantity' => 1,
-        'unit_price' => 100.00,
+        'quantity' => '1',
+        'unit_price' => '100.00',
+        'line_amount' => '100.00',
+        'net' => '100.00',
+        'vat' => '15.00',
+        'gross' => '115.00',
         'vat_category' => VatCategory::STANDARD,
-        'vat_rate' => 15.00,
+        'vat_rate' => '15.00',
     ];
+
+    /**
+     * The sample's one VAT group, its tax rounded once from the group's taxable amount.
+     */
+    public const VAT_GROUPS = [
+        ['category' => VatCategory::STANDARD, 'rate' => '15.00', 'taxable' => '100.00', 'tax' => '15.00'],
+    ];
+
+    /**
+     * The sample's totals: the line nets, the groups' tax and the two added.
+     */
+    public const TOTALS = ['net' => '100.00', 'vat' => '15.00', 'gross' => '115.00'];
 
     /**
      * A buyer with the full address standard invoices require.

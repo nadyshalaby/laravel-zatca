@@ -38,8 +38,8 @@ class QrGenerator
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
             3 => $this->formatTimestamp($invoice->getIssueDate()),
-            4 => $this->formatAmount($invoice->getTotalWithVat()),
-            5 => $this->formatAmount($invoice->getTotalVat()),
+            4 => $invoice->getTotalWithVat(),
+            5 => $invoice->getTotalVat(),
             6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
             7 => $signature->signatureValue,                      // base64 SignatureValue string
             8 => $this->formatPublicKey($signature->publicKey),  // SPKI DER bytes
@@ -58,8 +58,8 @@ class QrGenerator
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
             3 => $this->formatTimestamp($invoice->getIssueDate()),
-            4 => $this->formatAmount($invoice->getTotalWithVat()),
-            5 => $this->formatAmount($invoice->getTotalVat()),
+            4 => $invoice->getTotalWithVat(),
+            5 => $invoice->getTotalVat(),
         ];
 
         return $this->encoder->encode($tags);
@@ -81,14 +81,6 @@ class QrGenerator
     protected function formatTimestamp(\DateTimeInterface $date): string
     {
         return $date->format('Y-m-d\TH:i:s\Z');
-    }
-
-    /**
-     * Format amount to 2 decimal places.
-     */
-    protected function formatAmount(float $amount): string
-    {
-        return number_format($amount, 2, '.', '');
     }
 
     /**

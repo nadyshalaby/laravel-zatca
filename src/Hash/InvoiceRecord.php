@@ -23,9 +23,11 @@ class InvoiceRecord
 
     public string $subType;
 
-    public float $totalAmount;
+    /** The total with VAT, as priced: whole units, a point and two decimals, for the `decimal(15,2)` column. */
+    public string $totalAmount;
 
-    public float $vatAmount;
+    /** The VAT, as priced, for the `decimal(15,2)` column. */
+    public string $vatAmount;
 
     public ?string $xml = null;
 

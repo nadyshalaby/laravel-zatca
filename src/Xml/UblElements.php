@@ -6,7 +6,7 @@ use DOMDocument;
 use DOMElement;
 
 /**
- * Creates the elements of one UBL document and formats the amounts they carry.
+ * Creates the elements of one UBL document.
  */
 class UblElements
 {
@@ -51,13 +51,5 @@ class UblElements
         $taxScheme = $this->createElement('cac:TaxScheme');
         $this->addElement($taxScheme, 'cbc:ID', 'VAT');
         $parent->appendChild($taxScheme);
-    }
-
-    /**
-     * Format amount for XML.
-     */
-    public function formatAmount(float $amount): string
-    {
-        return number_format($amount, 2, '.', '');
     }
 }

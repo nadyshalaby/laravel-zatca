@@ -4,10 +4,14 @@ namespace Corecave\Zatca\Xml;
 
 use Corecave\Zatca\Contracts\InvoiceInterface;
 use Corecave\Zatca\Enums\VatCategory;
+use Corecave\Zatca\Invoice\VatGroup;
 use DOMElement;
 
 /**
- * Writes the document-level totals of a UBL invoice: its allowance, tax totals and legal monetary total.
+ * Writes the document-level totals of a UBL invoice, as priced: its tax totals and legal monetary total.
+ *
+ * No document-level allowance is written: every discount sits on its line (BT-136), so the total without VAT is
+ * the sum of the line nets (BR-CO-13), and a document allowance would need a VAT category of its own (BR-32).
  */
 class UblTotalsWriter
 {
@@ -16,93 +20,51 @@ class UblTotalsWriter
     ) {}
 
     /**
-     * Add the document-level allowance, the tax totals and the legal monetary total.
+     * Add the tax totals and the legal monetary total.
      */
     public function addTotals(DOMElement $parent, InvoiceInterface $invoice): void
     {
-        // Add allowance/charge (document level)
-        if ($invoice->getTotalDiscount() > 0) {
-            $this->addAllowanceCharge($parent, $invoice);
-        }
-
-        // Add tax total
         $this->addTaxTotal($parent, $invoice);
-
-        // Add legal monetary total
         $this->addLegalMonetaryTotal($parent, $invoice);
     }
 
     /**
-     * Add allowance/charge.
-     */
-    protected function addAllowanceCharge(DOMElement $parent, InvoiceInterface $invoice): void
-    {
-        $allowance = $this->elements->createElement('cac:AllowanceCharge');
-        $this->elements->addElement($allowance, 'cbc:ChargeIndicator', 'false');
-        $this->elements->addElement($allowance, 'cbc:AllowanceChargeReason', 'Discount');
-
-        $amount = $this->elements->createElement('cbc:Amount', $this->elements->formatAmount($invoice->getTotalDiscount()));
-        $amount->setAttribute('currencyID', $invoice->getCurrency());
-        $allowance->appendChild($amount);
-
-        $parent->appendChild($allowance);
-    }
-
-    /**
-     * Add tax total.
+     * Add the tax total with one subtotal per VAT group, then the second tax total ZATCA asks for.
      */
     protected function addTaxTotal(DOMElement $parent, InvoiceInterface $invoice): void
     {
         $taxTotal = $this->elements->createElement('cac:TaxTotal');
+        $taxTotal->appendChild($this->amount('cbc:TaxAmount', $invoice->getTotalVat(), $invoice->getCurrency()));
 
-        // Total tax amount
-        $taxAmount = $this->elements->createElement('cbc:TaxAmount', $this->elements->formatAmount($invoice->getTotalVat()));
-        $taxAmount->setAttribute('currencyID', $invoice->getCurrency());
-        $taxTotal->appendChild($taxAmount);
-
-        // Tax subtotals by category
-        foreach ($invoice->getVatBreakdown() as $breakdown) {
-            $this->addTaxSubtotal($taxTotal, $breakdown, $invoice->getCurrency());
+        foreach ($invoice->getVatBreakdown() as $group) {
+            $this->addTaxSubtotal($taxTotal, $group, $invoice->getCurrency());
         }
 
         $parent->appendChild($taxTotal);
 
         // Add second TaxTotal for tax currency (required by ZATCA)
         $taxTotal2 = $this->elements->createElement('cac:TaxTotal');
-        $taxAmount2 = $this->elements->createElement('cbc:TaxAmount', $this->elements->formatAmount($invoice->getTotalVat()));
-        $taxAmount2->setAttribute('currencyID', $invoice->getCurrency());
-        $taxTotal2->appendChild($taxAmount2);
+        $taxTotal2->appendChild($this->amount('cbc:TaxAmount', $invoice->getTotalVat(), $invoice->getCurrency()));
         $parent->appendChild($taxTotal2);
     }
 
     /**
-     * Add tax subtotal.
-     *
-     * @param  array<string, mixed>  $breakdown
+     * Add one VAT group's subtotal: its taxable amount (BT-116) and its tax (BT-117) as priced, its category and rate.
      */
-    protected function addTaxSubtotal(DOMElement $taxTotal, array $breakdown, string $currency): void
+    protected function addTaxSubtotal(DOMElement $taxTotal, VatGroup $group, string $currency): void
     {
         $subtotal = $this->elements->createElement('cac:TaxSubtotal');
+        $subtotal->appendChild($this->amount('cbc:TaxableAmount', $group->taxable->value, $currency));
+        $subtotal->appendChild($this->amount('cbc:TaxAmount', $group->tax->value, $currency));
 
-        // Taxable amount
-        $taxableAmount = $this->elements->createElement('cbc:TaxableAmount', $this->elements->formatAmount($breakdown['taxable_amount']));
-        $taxableAmount->setAttribute('currencyID', $currency);
-        $subtotal->appendChild($taxableAmount);
-
-        // Tax amount
-        $taxAmount = $this->elements->createElement('cbc:TaxAmount', $this->elements->formatAmount($breakdown['tax_amount']));
-        $taxAmount->setAttribute('currencyID', $currency);
-        $subtotal->appendChild($taxAmount);
-
-        // Tax category
         $taxCategory = $this->elements->createElement('cac:TaxCategory');
-        $this->elements->addElement($taxCategory, 'cbc:ID', $breakdown['category']->value);
-        $this->elements->addElement($taxCategory, 'cbc:Percent', $this->elements->formatAmount($breakdown['rate']));
+        $this->elements->addElement($taxCategory, 'cbc:ID', $group->category->value);
+        $this->elements->addElement($taxCategory, 'cbc:Percent', $group->rate);
 
         // Add exemption reason if applicable
-        if ($breakdown['exemption_reason'] && $breakdown['category'] !== VatCategory::STANDARD) {
-            $this->elements->addElement($taxCategory, 'cbc:TaxExemptionReasonCode', $breakdown['exemption_reason']->value);
-            $this->elements->addElement($taxCategory, 'cbc:TaxExemptionReason', $breakdown['exemption_reason']->description());
+        if ($group->exemptionReason !== null && $group->category !== VatCategory::STANDARD) {
+            $this->elements->addElement($taxCategory, 'cbc:TaxExemptionReasonCode', $group->exemptionReason->value);
+            $this->elements->addElement($taxCategory, 'cbc:TaxExemptionReason', $group->exemptionReason->description());
         }
 
         $this->elements->addVatTaxScheme($taxCategory);
@@ -112,39 +74,29 @@ class UblTotalsWriter
     }
 
     /**
-     * Add legal monetary total.
+     * Add the legal monetary total: the line nets (BT-106), the total without VAT (BT-109, the same), the total with
+     * VAT (BT-112) and the payable amount (BT-115, the same).
      */
     protected function addLegalMonetaryTotal(DOMElement $parent, InvoiceInterface $invoice): void
     {
+        $currency = $invoice->getCurrency();
         $monetary = $this->elements->createElement('cac:LegalMonetaryTotal');
-
-        // Line extension amount (sum of line subtotals)
-        $lineExt = $this->elements->createElement('cbc:LineExtensionAmount', $this->elements->formatAmount($invoice->getSubtotal()));
-        $lineExt->setAttribute('currencyID', $invoice->getCurrency());
-        $monetary->appendChild($lineExt);
-
-        // Tax exclusive amount
-        $taxExcl = $this->elements->createElement('cbc:TaxExclusiveAmount', $this->elements->formatAmount($invoice->getSubtotal()));
-        $taxExcl->setAttribute('currencyID', $invoice->getCurrency());
-        $monetary->appendChild($taxExcl);
-
-        // Tax inclusive amount
-        $taxIncl = $this->elements->createElement('cbc:TaxInclusiveAmount', $this->elements->formatAmount($invoice->getTotalWithVat()));
-        $taxIncl->setAttribute('currencyID', $invoice->getCurrency());
-        $monetary->appendChild($taxIncl);
-
-        // Allowance total
-        if ($invoice->getTotalDiscount() > 0) {
-            $allowance = $this->elements->createElement('cbc:AllowanceTotalAmount', $this->elements->formatAmount($invoice->getTotalDiscount()));
-            $allowance->setAttribute('currencyID', $invoice->getCurrency());
-            $monetary->appendChild($allowance);
-        }
-
-        // Payable amount
-        $payable = $this->elements->createElement('cbc:PayableAmount', $this->elements->formatAmount($invoice->getTotalWithVat()));
-        $payable->setAttribute('currencyID', $invoice->getCurrency());
-        $monetary->appendChild($payable);
+        $monetary->appendChild($this->amount('cbc:LineExtensionAmount', $invoice->getSubtotal(), $currency));
+        $monetary->appendChild($this->amount('cbc:TaxExclusiveAmount', $invoice->getSubtotal(), $currency));
+        $monetary->appendChild($this->amount('cbc:TaxInclusiveAmount', $invoice->getTotalWithVat(), $currency));
+        $monetary->appendChild($this->amount('cbc:PayableAmount', $invoice->getTotalWithVat(), $currency));
 
         $parent->appendChild($monetary);
+    }
+
+    /**
+     * An amount element in the document's currency.
+     */
+    protected function amount(string $name, string $amount, string $currency): DOMElement
+    {
+        $element = $this->elements->createElement($name, $amount);
+        $element->setAttribute('currencyID', $currency);
+
+        return $element;
     }
 }

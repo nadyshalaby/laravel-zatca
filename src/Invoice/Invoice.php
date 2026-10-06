@@ -52,6 +52,11 @@ class Invoice implements InvoiceInterface
     /** @var array<int, string> */
     protected array $notes = [];
 
+    /** @var list<VatGroup> */
+    protected array $vatGroups;
+
+    protected DocumentTotals $totals;
+
     public function __construct(InvoiceData $data)
     {
         $this->uuid = $data->uuid;
@@ -70,6 +75,8 @@ class Invoice implements InvoiceInterface
         $this->originalInvoiceReference = $data->originalInvoiceReference;
         $this->instructionNote = $data->instructionNote;
         $this->notes = $data->notes;
+        $this->vatGroups = $data->vatGroups;
+        $this->totals = $data->totals;
     }
 
     /**
@@ -159,36 +166,24 @@ class Invoice implements InvoiceInterface
         return $this->lineItems;
     }
 
-    public function getSubtotal(): float
+    public function getSubtotal(): string
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getSubtotal(),
-            0
-        ), 2);
+        return $this->totals->net->value;
     }
 
-    public function getTotalVat(): float
+    public function getTotalVat(): string
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getVatAmount(),
-            0
-        ), 2);
+        return $this->totals->vat->value;
     }
 
-    public function getTotalWithVat(): float
+    public function getTotalWithVat(): string
     {
-        return round($this->getSubtotal() + $this->getTotalVat(), 2);
+        return $this->totals->gross->value;
     }
 
-    public function getTotalDiscount(): float
+    public function getTotals(): DocumentTotals
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getDiscount(),
-            0
-        ), 2);
+        return $this->totals;
     }
 
     public function getCurrency(): string
@@ -275,34 +270,7 @@ class Invoice implements InvoiceInterface
 
     public function getVatBreakdown(): array
     {
-        $breakdown = [];
-
-        foreach ($this->lineItems as $item) {
-            $category = $item->getVatCategory()->value;
-            $rate = $item->getVatRate();
-            $key = "{$category}_{$rate}";
-
-            if (! isset($breakdown[$key])) {
-                $breakdown[$key] = [
-                    'category' => $item->getVatCategory(),
-                    'rate' => $rate,
-                    'taxable_amount' => 0,
-                    'tax_amount' => 0,
-                    'exemption_reason' => $item->getVatExemptionReason(),
-                ];
-            }
-
-            $breakdown[$key]['taxable_amount'] += $item->getSubtotal();
-            $breakdown[$key]['tax_amount'] += $item->getVatAmount();
-        }
-
-        // Round the totals
-        foreach ($breakdown as $key => $data) {
-            $breakdown[$key]['taxable_amount'] = round($data['taxable_amount'], 2);
-            $breakdown[$key]['tax_amount'] = round($data['tax_amount'], 2);
-        }
-
-        return array_values($breakdown);
+        return $this->vatGroups;
     }
 
     public function toArray(): array
@@ -317,10 +285,7 @@ class Invoice implements InvoiceInterface
             'seller' => $this->seller,
             'buyer' => $this->buyer,
             'line_items' => array_map(fn ($item) => $item->toArray(), $this->lineItems),
-            'subtotal' => $this->getSubtotal(),
-            'total_vat' => $this->getTotalVat(),
-            'total_with_vat' => $this->getTotalWithVat(),
-            'total_discount' => $this->getTotalDiscount(),
+            'totals' => $this->totals->toArray(),
             'currency' => $this->currency,
             'icv' => $this->icv,
             'previous_invoice_hash' => $this->previousInvoiceHash,
@@ -330,7 +295,7 @@ class Invoice implements InvoiceInterface
             'original_invoice_reference' => $this->originalInvoiceReference,
             'instruction_note' => $this->instructionNote,
             'notes' => $this->notes,
-            'vat_breakdown' => $this->getVatBreakdown(),
+            'vat_breakdown' => array_map(fn (VatGroup $group) => $group->toArray(), $this->vatGroups),
         ];
     }
 }

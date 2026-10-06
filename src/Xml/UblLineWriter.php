@@ -26,14 +26,8 @@ class UblLineWriter
     }
 
     /**
-     * Add invoice line.
-     *
-     * Per ZATCA KSA-13 business rule:
-     * LineExtensionAmount (BT-131) = KSA-12 - BT-136 + BT-141
-     * Where:
-     * - KSA-12: Line item base amount (Quantity × Unit Price)
-     * - BT-136: Allowance amount (discount)
-     * - BT-141: Charge amount
+     * Add invoice line, every figure as priced: the quantity (BT-129), the net (BT-131), the discount (BT-136),
+     * the line VAT (KSA-11), the net with VAT (KSA-12) and the unit price (BT-146).
      */
     protected function addInvoiceLine(DOMElement $parent, LineItemInterface $item, string $currency): void
     {
@@ -43,18 +37,17 @@ class UblLineWriter
         $this->elements->addElement($line, 'cbc:ID', (string) $item->getId());
 
         // Invoiced quantity
-        $quantity = $this->elements->createElement('cbc:InvoicedQuantity', $this->formatQuantity($item->getQuantity()));
+        $quantity = $this->elements->createElement('cbc:InvoicedQuantity', $item->getQuantity());
         $quantity->setAttribute('unitCode', $item->getUnitCode());
         $line->appendChild($quantity);
 
-        // Line extension amount (net amount after discount: KSA-12 - BT-136)
-        $lineExt = $this->elements->createElement('cbc:LineExtensionAmount', $this->elements->formatAmount($item->getSubtotal()));
+        // Line extension amount: the net, the line amount less the discount (BT-131)
+        $lineExt = $this->elements->createElement('cbc:LineExtensionAmount', $item->getSubtotal());
         $lineExt->setAttribute('currencyID', $currency);
         $line->appendChild($lineExt);
 
         // Add line-level AllowanceCharge if there's a discount (BT-136)
-        $discount = $item->getDiscount();
-        if ($discount > 0) {
+        if ($item->hasDiscount()) {
             $this->addLineAllowanceCharge($line, $item, $currency);
         }
 
@@ -71,14 +64,9 @@ class UblLineWriter
     }
 
     /**
-     * Add line-level allowance/charge for discounts.
-     *
-     * Per ZATCA requirements, line-level discounts must be represented as
-     * AllowanceCharge elements with:
-     * - ChargeIndicator = false (for discount/allowance)
-     * - AllowanceChargeReason = reason text
-     * - Amount = discount amount (BT-136)
-     * - BaseAmount = original amount before discount (KSA-12)
+     * Add the line's discount as an allowance: reason code 95 and the amount alone (BT-136), with no base amount
+     * and no percentage, which ZATCA allows (v1.2 §9.4, p.18) and which would otherwise have to agree with the
+     * amount to the halala (BR-KSA-EN16931-03).
      */
     protected function addLineAllowanceCharge(DOMElement $line, LineItemInterface $item, string $currency): void
     {
@@ -93,22 +81,10 @@ class UblLineWriter
         // Allowance reason
         $this->elements->addElement($allowance, 'cbc:AllowanceChargeReason', 'Discount');
 
-        // Multiplier factor (discount percentage if applicable)
-        $baseAmount = $item->getQuantity() * $item->getUnitPrice();
-        if ($baseAmount > 0) {
-            $discountPercent = ($item->getDiscount() / $baseAmount) * 100;
-            $this->elements->addElement($allowance, 'cbc:MultiplierFactorNumeric', $this->elements->formatAmount($discountPercent));
-        }
-
         // Discount amount (BT-136)
-        $amount = $this->elements->createElement('cbc:Amount', $this->elements->formatAmount($item->getDiscount()));
+        $amount = $this->elements->createElement('cbc:Amount', $item->getDiscount());
         $amount->setAttribute('currencyID', $currency);
         $allowance->appendChild($amount);
-
-        // Base amount (KSA-12: Quantity × Unit Price)
-        $base = $this->elements->createElement('cbc:BaseAmount', $this->elements->formatAmount($baseAmount));
-        $base->setAttribute('currencyID', $currency);
-        $allowance->appendChild($base);
 
         $line->appendChild($allowance);
     }
@@ -119,12 +95,12 @@ class UblLineWriter
     protected function addLineTaxTotal(DOMElement $line, LineItemInterface $item, string $currency): void
     {
         $taxTotal = $this->elements->createElement('cac:TaxTotal');
-        $taxAmount = $this->elements->createElement('cbc:TaxAmount', $this->elements->formatAmount($item->getVatAmount()));
+        $taxAmount = $this->elements->createElement('cbc:TaxAmount', $item->getVatAmount());
         $taxAmount->setAttribute('currencyID', $currency);
         $taxTotal->appendChild($taxAmount);
 
-        // Rounding amount (required)
-        $roundingAmount = $this->elements->createElement('cbc:RoundingAmount', $this->elements->formatAmount($item->getTotal()));
+        // Rounding amount: the net plus the line VAT (KSA-12)
+        $roundingAmount = $this->elements->createElement('cbc:RoundingAmount', $item->getTotal());
         $roundingAmount->setAttribute('currencyID', $currency);
         $taxTotal->appendChild($roundingAmount);
 
@@ -142,7 +118,7 @@ class UblLineWriter
         // Classified tax category
         $taxCategory = $this->elements->createElement('cac:ClassifiedTaxCategory');
         $this->elements->addElement($taxCategory, 'cbc:ID', $item->getVatCategory()->value);
-        $this->elements->addElement($taxCategory, 'cbc:Percent', $this->elements->formatAmount($item->getVatRate()));
+        $this->elements->addElement($taxCategory, 'cbc:Percent', $item->getVatRate());
         $this->elements->addVatTaxScheme($taxCategory);
 
         $itemEl->appendChild($taxCategory);
@@ -155,7 +131,7 @@ class UblLineWriter
     protected function addPrice(DOMElement $line, LineItemInterface $item, string $currency): void
     {
         $price = $this->elements->createElement('cac:Price');
-        $priceAmount = $this->elements->createElement('cbc:PriceAmount', $this->elements->formatAmount($item->getUnitPrice()));
+        $priceAmount = $this->elements->createElement('cbc:PriceAmount', $item->getUnitPrice());
         $priceAmount->setAttribute('currencyID', $currency);
         $price->appendChild($priceAmount);
 
@@ -165,14 +141,5 @@ class UblLineWriter
         $price->appendChild($baseQuantity);
 
         $line->appendChild($price);
-    }
-
-    /**
-     * Format quantity for XML.
-     */
-    protected function formatQuantity(float $quantity): string
-    {
-        // Use up to 5 decimal places for quantity
-        return rtrim(rtrim(number_format($quantity, 5, '.', ''), '0'), '.');
     }
 }

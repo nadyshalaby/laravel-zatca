@@ -20,15 +20,13 @@ enum VatCategory: string
     case OUT_OF_SCOPE = 'O';
 
     /**
-     * Get the default VAT rate for this category.
+     * Get the default VAT rate for this category, a percentage with two decimals as a line carries it.
      */
-    public function defaultRate(): float
+    public function defaultRate(): string
     {
         return match ($this) {
-            self::STANDARD => 15.00,
-            self::ZERO_RATED => 0.00,
-            self::EXEMPT => 0.00,
-            self::OUT_OF_SCOPE => 0.00,
+            self::STANDARD => '15.00',
+            self::ZERO_RATED, self::EXEMPT, self::OUT_OF_SCOPE => '0.00',
         };
     }
 

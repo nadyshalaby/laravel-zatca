@@ -151,12 +151,6 @@ class UblGenerator
         // Add invoice type code
         $this->addInvoiceTypeCode($root, $invoice);
 
-        // Add instruction note for credit/debit notes (KSA-10 reason)
-        // Per UBL 2.1 schema, Note must come AFTER InvoiceTypeCode and BEFORE DocumentCurrencyCode
-        if (($invoice->isCreditNote() || $invoice->isDebitNote()) && $invoice->getInstructionNote()) {
-            $this->elements->addElement($root, 'cbc:Note', $invoice->getInstructionNote());
-        }
-
         // Add document currency
         $this->elements->addElement($root, 'cbc:DocumentCurrencyCode', $invoice->getCurrency());
 
@@ -273,7 +267,8 @@ class UblGenerator
     }
 
     /**
-     * Add payment means.
+     * Add payment means. A credit or debit note's instruction note is its reason (KSA-10), which ZATCA requires
+     * there (BR-KSA-17), so a note's payment terms are not written; an invoice's instruction note is its terms.
      */
     protected function addPaymentMeans(DOMElement $parent, InvoiceInterface $invoice): void
     {
@@ -283,8 +278,12 @@ class UblGenerator
         $paymentCode = $invoice->getPaymentMethod() ?? '10';
         $this->elements->addElement($paymentMeans, 'cbc:PaymentMeansCode', $paymentCode);
 
-        if ($invoice->getPaymentTerms()) {
-            $this->elements->addElement($paymentMeans, 'cbc:InstructionNote', $invoice->getPaymentTerms());
+        $instructionNote = $invoice->isCreditNote() || $invoice->isDebitNote()
+            ? $invoice->getInstructionNote()
+            : $invoice->getPaymentTerms();
+
+        if ($instructionNote) {
+            $this->elements->addElement($paymentMeans, 'cbc:InstructionNote', $instructionNote);
         }
 
         $parent->appendChild($paymentMeans);

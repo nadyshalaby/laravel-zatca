@@ -22,8 +22,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $qr_code
  * @property array<string, mixed>|null $zatca_response
  * @property string|null $reference_id
- * @property float $total_amount
- * @property float $vat_amount
+ * @property string $total_amount
+ * @property string $vat_amount
  * @property Carbon $created_at
  * @property Carbon $updated_at
  */

@@ -6,7 +6,7 @@ use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Client\ZatcaClient;
 use Corecave\Zatca\Contracts\InvoiceInterface;
-use Corecave\Zatca\Enums\VatCategory;
+use Corecave\Zatca\Invoice\ComplianceSample;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Xml\InvoiceSigner;
 use Illuminate\Console\Command;
@@ -267,13 +267,9 @@ class ComplianceCommand extends Command
             ]);
         }
 
-        $builder->addLineItem([
-            'name' => 'Test Product',
-            'quantity' => 1,
-            'unit_price' => 100.00,
-            'vat_category' => VatCategory::STANDARD,
-            'vat_rate' => 15.00,
-        ]);
+        $builder->addLineItem(['name' => 'Test Product'] + ComplianceSample::LINE_ITEM)
+            ->setVatGroups(ComplianceSample::VAT_GROUPS)
+            ->setTotals(...ComplianceSample::TOTALS);
 
         return $builder->build();
     }

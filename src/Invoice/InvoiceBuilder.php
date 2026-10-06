@@ -13,6 +13,8 @@ use Illuminate\Support\Str;
 
 class InvoiceBuilder
 {
+    use BuildsDocumentKinds;
+
     /** @var array<string, mixed> */
     protected array $sellerConfig;
 
@@ -54,6 +56,12 @@ class InvoiceBuilder
     /** @var array<int, string> */
     protected array $notes = [];
 
+    /** @var list<array<string, mixed>> */
+    protected array $vatGroups = [];
+
+    /** @var array{net: string, vat: string, gross: string}|null */
+    protected ?array $totals = null;
+
     protected bool $isSimplified = false;
 
     protected bool $isCreditNote = false;
@@ -79,68 +87,6 @@ class InvoiceBuilder
             config('zatca.seller', []),
             config('zatca.invoice', [])
         );
-    }
-
-    /**
-     * Create a standard (B2B) invoice builder.
-     */
-    public static function standard(): self
-    {
-        $builder = self::fromConfig();
-
-        $builder->isSimplified = false;
-        $builder->type = InvoiceType::INVOICE;
-        $builder->subType = InvoiceSubType::STANDARD;
-
-        return $builder;
-    }
-
-    /**
-     * Create a simplified (B2C) invoice builder.
-     */
-    public static function simplified(): self
-    {
-        $builder = self::fromConfig();
-
-        $builder->isSimplified = true;
-        $builder->type = InvoiceType::INVOICE;
-        $builder->subType = InvoiceSubType::SIMPLIFIED;
-
-        return $builder;
-    }
-
-    /**
-     * Create a credit note builder.
-     */
-    public static function creditNote(bool $simplified = false): self
-    {
-        $builder = self::fromConfig();
-
-        $builder->isSimplified = $simplified;
-        $builder->isCreditNote = true;
-        $builder->type = InvoiceType::CREDIT_NOTE;
-        $builder->subType = $simplified
-            ? InvoiceSubType::SIMPLIFIED
-            : InvoiceSubType::STANDARD;
-
-        return $builder;
-    }
-
-    /**
-     * Create a debit note builder.
-     */
-    public static function debitNote(bool $simplified = false): self
-    {
-        $builder = self::fromConfig();
-
-        $builder->isSimplified = $simplified;
-        $builder->isDebitNote = true;
-        $builder->type = InvoiceType::DEBIT_NOTE;
-        $builder->subType = $simplified
-            ? InvoiceSubType::SIMPLIFIED
-            : InvoiceSubType::STANDARD;
-
-        return $builder;
     }
 
     /**
@@ -227,6 +173,29 @@ class InvoiceBuilder
     public function setLineItems(array $items): self
     {
         $this->lineItems = $items;
+
+        return $this;
+    }
+
+    /**
+     * Set the VAT groups as priced: each with its category, rate (`'15.00'`), taxable amount and tax, and any
+     * exemption reason; the tax rounded once from the taxable amount, never summed from the lines' VAT.
+     *
+     * @param  list<array<string, mixed>>  $groups
+     */
+    public function setVatGroups(array $groups): self
+    {
+        $this->vatGroups = $groups;
+
+        return $this;
+    }
+
+    /**
+     * Set the totals as priced: the sum of the line nets, the sum of the groups' tax, and the two added.
+     */
+    public function setTotals(string $net, string $vat, string $gross): self
+    {
+        $this->totals = ['net' => $net, 'vat' => $vat, 'gross' => $gross];
 
         return $this;
     }
@@ -366,8 +335,22 @@ class InvoiceBuilder
         $data->originalInvoiceReference = $this->originalInvoiceReference;
         $data->instructionNote = $this->instructionNote;
         $data->notes = $this->notes;
+        $data->vatGroups = array_map(fn (array $group) => VatGroup::fromArray($group), $this->vatGroups);
+        $data->totals = $this->documentTotals();
 
         return $data;
+    }
+
+    /**
+     * The totals as priced; validate() has made sure they were set.
+     *
+     * @throws InvoiceException when a total is not exact
+     */
+    protected function documentTotals(): DocumentTotals
+    {
+        $totals = $this->totals ?? throw InvoiceException::missingField('totals');
+
+        return new DocumentTotals(Amount::of($totals['net']), Amount::of($totals['vat']), Amount::of($totals['gross']));
     }
 
     /**
@@ -448,6 +431,14 @@ class InvoiceBuilder
             throw InvoiceException::noLineItems();
         }
 
+        if ($this->vatGroups === []) {
+            throw InvoiceException::missingField('vat_groups');
+        }
+
+        if ($this->totals === null) {
+            throw InvoiceException::missingField('totals');
+        }
+
         // Standard invoices require buyer information
         if (! $this->isSimplified && empty($this->buyer)) {
             throw InvoiceException::buyerRequired();
@@ -460,12 +451,12 @@ class InvoiceBuilder
 
         // Validate line items
         foreach ($this->lineItems as $index => $item) {
-            $this->validateLineItem($item, $index);
+            $this->validateLineItem($item, $index + 1);
         }
     }
 
     /**
-     * Validate a line item.
+     * Validate a line item's name; the line refuses figures that are missing or not exact itself.
      *
      * @param  array<string, mixed>  $item
      *
@@ -476,14 +467,6 @@ class InvoiceBuilder
         if (empty($item['name'])) {
             throw InvoiceException::invalidLineItem($index, 'name is required');
         }
-
-        if (! isset($item['quantity']) || $item['quantity'] <= 0) {
-            throw InvoiceException::invalidLineItem($index, 'quantity must be greater than 0');
-        }
-
-        if (! isset($item['unit_price']) || $item['unit_price'] < 0) {
-            throw InvoiceException::invalidLineItem($index, 'unit_price must be 0 or greater');
-        }
     }
 
     /**
@@ -493,7 +476,9 @@ class InvoiceBuilder
     {
         $this->setInvoiceNumber(ComplianceSample::INVOICE_NUMBER)
             ->setIssueDate(Carbon::now())
-            ->addLineItem(ComplianceSample::LINE_ITEM);
+            ->addLineItem(ComplianceSample::LINE_ITEM)
+            ->setVatGroups(ComplianceSample::VAT_GROUPS)
+            ->setTotals(...ComplianceSample::TOTALS);
 
         // Standard invoices require buyer with full address
         if (! $this->isSimplified) {

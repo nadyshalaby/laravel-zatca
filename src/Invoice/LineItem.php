@@ -7,79 +7,143 @@ use Corecave\Zatca\Enums\VatCategory;
 use Corecave\Zatca\Enums\VatExemptionReason;
 use Corecave\Zatca\Exceptions\InvoiceException;
 
+/**
+ * One invoice line, every figure as the caller priced it and written as given.
+ */
 class LineItem implements LineItemInterface
 {
+    /** A quantity: whole units with up to six decimals. */
+    public const string QUANTITY_PATTERN = '/^(0|[1-9]\d{0,8})(\.\d{1,6})?$/';
+
+    /** A VAT rate: a percentage with two decimals. */
+    public const string RATE_PATTERN = '/^(0|[1-9]\d{0,2})\.\d{2}$/';
+
+    /** The figures a line is priced with, by their array keys. */
+    private const array FIGURES = ['unit_price', 'line_amount', 'net', 'vat', 'gross'];
+
     protected int $id;
 
     protected string $name;
 
-    protected float $quantity;
+    protected string $quantity;
 
     protected string $unitCode;
 
-    protected float $unitPrice;
+    protected Amount $unitPrice;
+
+    protected Amount $lineAmount;
+
+    protected Amount $discount;
+
+    protected Amount $net;
+
+    protected Amount $vat;
+
+    protected Amount $gross;
 
     protected VatCategory $vatCategory;
 
-    protected float $vatRate;
+    protected string $vatRate;
 
     protected ?VatExemptionReason $vatExemptionReason;
-
-    protected float $discount;
 
     /** @var array<string, mixed> */
     protected array $identifiers;
 
+    /**
+     * @throws InvoiceException when the quantity or the rate is not exact, or the discount is more than the line
+     */
     public function __construct(LineItemData $data)
     {
         $this->id = $data->id;
         $this->name = $data->name;
         $this->quantity = $data->quantity;
-        $this->unitPrice = $data->unitPrice;
-        $this->vatCategory = $data->vatCategory;
-        $this->vatRate = $data->vatRate ?? $data->vatCategory->defaultRate();
         $this->unitCode = $data->unitCode;
+        $this->unitPrice = $data->unitPrice;
+        $this->lineAmount = $data->lineAmount;
         $this->discount = $data->discount;
+        $this->net = $data->net;
+        $this->vat = $data->vat;
+        $this->gross = $data->gross;
+        $this->vatCategory = $data->vatCategory;
+        $this->vatRate = $data->vatRate;
         $this->vatExemptionReason = $data->vatExemptionReason;
         $this->identifiers = $data->identifiers;
 
-        // Compared to the halala, so a float reading the line a hair short never refuses a discount of all of it
-        if (round($this->discount - $this->quantity * $this->unitPrice, 2) > 0) {
-            throw InvoiceException::discountExceedsLine($this->id, $this->discount, $this->quantity * $this->unitPrice);
-        }
+        $this->refuseInexactLine();
     }
 
     /**
-     * Create from array.
+     * Create from array: the figures are text, as priced (`'175.05'`), and an absent discount is none.
      *
      * @param  array<string, mixed>  $data
+     *
+     * @throws InvoiceException when a figure is missing or is not exact
      */
     public static function fromArray(array $data, int $id = 1): self
     {
-        $vatCategory = $data['vat_category'] ?? VatCategory::STANDARD;
-
-        if (is_string($vatCategory)) {
-            $vatCategory = VatCategory::from($vatCategory);
-        }
-
-        $vatExemptionReason = $data['vat_exemption_reason'] ?? null;
-        if (is_string($vatExemptionReason)) {
-            $vatExemptionReason = VatExemptionReason::from($vatExemptionReason);
+        foreach ([...self::FIGURES, 'quantity', 'vat_rate'] as $field) {
+            if (! isset($data[$field])) {
+                throw InvoiceException::invalidLineItem($id, "{$field} is required");
+            }
         }
 
         $line = new LineItemData;
         $line->id = $data['id'] ?? $id;
         $line->name = $data['name'];
-        $line->quantity = (float) $data['quantity'];
-        $line->unitPrice = (float) $data['unit_price'];
-        $line->vatCategory = $vatCategory;
-        $line->vatRate = $data['vat_rate'] ?? null;
+        $line->quantity = $data['quantity'];
         $line->unitCode = $data['unit_code'] ?? 'PCE';
-        $line->discount = (float) ($data['discount'] ?? 0);
-        $line->vatExemptionReason = $vatExemptionReason;
+        $line->vatCategory = self::category($data['vat_category'] ?? VatCategory::STANDARD);
+        $line->vatRate = $data['vat_rate'];
+        $line->vatExemptionReason = self::exemptionReason($data['vat_exemption_reason'] ?? null);
         $line->identifiers = $data['identifiers'] ?? [];
 
-        return new self($line);
+        return new self(self::withFigures($line, $data));
+    }
+
+    /**
+     * The line with its priced figures read from the array.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function withFigures(LineItemData $line, array $data): LineItemData
+    {
+        $line->unitPrice = Amount::of($data['unit_price']);
+        $line->lineAmount = Amount::of($data['line_amount']);
+        $line->discount = Amount::of($data['discount'] ?? '0.00');
+        $line->net = Amount::of($data['net']);
+        $line->vat = Amount::of($data['vat']);
+        $line->gross = Amount::of($data['gross']);
+
+        return $line;
+    }
+
+    private static function category(VatCategory|string $category): VatCategory
+    {
+        return $category instanceof VatCategory ? $category : VatCategory::from($category);
+    }
+
+    private static function exemptionReason(VatExemptionReason|string|null $reason): ?VatExemptionReason
+    {
+        return is_string($reason) ? VatExemptionReason::from($reason) : $reason;
+    }
+
+    /**
+     * @throws InvoiceException
+     */
+    private function refuseInexactLine(): void
+    {
+        if (preg_match(self::QUANTITY_PATTERN, $this->quantity) !== 1 || preg_match('/^0(\.0+)?$/', $this->quantity) === 1) {
+            throw InvoiceException::invalidLineItem($this->id, "its quantity {$this->quantity} is not a number above 0 with up to six decimals");
+        }
+
+        if (preg_match(self::RATE_PATTERN, $this->vatRate) !== 1) {
+            throw InvoiceException::invalidLineItem($this->id, "its VAT rate {$this->vatRate} is not a percentage with two decimals");
+        }
+
+        if ($this->discount->isGreaterThan($this->lineAmount)) {
+            throw InvoiceException::discountExceedsLine($this->id, $this->discount->value, $this->lineAmount->value);
+        }
     }
 
     public function getId(): int
@@ -92,7 +156,7 @@ class LineItem implements LineItemInterface
         return $this->name;
     }
 
-    public function getQuantity(): float
+    public function getQuantity(): string
     {
         return $this->quantity;
     }
@@ -102,9 +166,9 @@ class LineItem implements LineItemInterface
         return $this->unitCode;
     }
 
-    public function getUnitPrice(): float
+    public function getUnitPrice(): string
     {
-        return $this->unitPrice;
+        return $this->unitPrice->value;
     }
 
     public function getVatCategory(): VatCategory
@@ -112,7 +176,7 @@ class LineItem implements LineItemInterface
         return $this->vatCategory;
     }
 
-    public function getVatRate(): float
+    public function getVatRate(): string
     {
         return $this->vatRate;
     }
@@ -122,24 +186,34 @@ class LineItem implements LineItemInterface
         return $this->vatExemptionReason;
     }
 
-    public function getDiscount(): float
+    public function getLineAmount(): string
     {
-        return $this->discount;
+        return $this->lineAmount->value;
     }
 
-    public function getSubtotal(): float
+    public function getDiscount(): string
     {
-        return round(($this->quantity * $this->unitPrice) - $this->discount, 2);
+        return $this->discount->value;
     }
 
-    public function getVatAmount(): float
+    public function hasDiscount(): bool
     {
-        return round($this->getSubtotal() * ($this->vatRate / 100), 2);
+        return ! $this->discount->isZero();
     }
 
-    public function getTotal(): float
+    public function getSubtotal(): string
     {
-        return round($this->getSubtotal() + $this->getVatAmount(), 2);
+        return $this->net->value;
+    }
+
+    public function getVatAmount(): string
+    {
+        return $this->vat->value;
+    }
+
+    public function getTotal(): string
+    {
+        return $this->gross->value;
     }
 
     public function getIdentifiers(): array
@@ -154,14 +228,15 @@ class LineItem implements LineItemInterface
             'name' => $this->name,
             'quantity' => $this->quantity,
             'unit_code' => $this->unitCode,
-            'unit_price' => $this->unitPrice,
+            'unit_price' => $this->unitPrice->value,
             'vat_category' => $this->vatCategory->value,
             'vat_rate' => $this->vatRate,
             'vat_exemption_reason' => $this->vatExemptionReason?->value,
-            'discount' => $this->discount,
-            'subtotal' => $this->getSubtotal(),
-            'vat_amount' => $this->getVatAmount(),
-            'total' => $this->getTotal(),
+            'line_amount' => $this->lineAmount->value,
+            'discount' => $this->discount->value,
+            'net' => $this->net->value,
+            'vat' => $this->vat->value,
+            'gross' => $this->gross->value,
             'identifiers' => $this->identifiers,
         ];
     }

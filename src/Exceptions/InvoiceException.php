@@ -37,11 +37,19 @@ class InvoiceException extends ZatcaException
     }
 
     /**
-     * A line whose discount is more than its quantity times its price, which would leave it a negative amount.
+     * A line whose discount is more than its line amount, which would leave it a negative amount.
      */
-    public static function discountExceedsLine(int $index, float $discount, float $gross): static
+    public static function discountExceedsLine(int $index, string $discount, string $lineAmount): static
     {
-        return static::invalidLineItem($index, sprintf('its discount of %.2F is more than its quantity times its price, %.2F', $discount, $gross));
+        return static::invalidLineItem($index, "its discount of {$discount} is more than its line amount, {$lineAmount}");
+    }
+
+    /**
+     * An amount handed over in any other form than whole units, a point and two decimals.
+     */
+    public static function invalidAmount(string $amount): static
+    {
+        return new static("Invalid amount '{$amount}': an amount is whole units, a point and two decimals, as it was priced");
     }
 
     /**

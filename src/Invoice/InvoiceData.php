@@ -48,4 +48,10 @@ class InvoiceData
 
     /** @var array<int, string> */
     public array $notes = [];
+
+    /** @var list<VatGroup> the VAT groups as priced, at least one */
+    public array $vatGroups = [];
+
+    /** The totals as priced. */
+    public DocumentTotals $totals;
 }

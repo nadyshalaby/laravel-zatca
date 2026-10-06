@@ -2,7 +2,9 @@
 
 namespace Corecave\Zatca\Xml;
 
+use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Exceptions\ValidationException;
+use Corecave\Zatca\Invoice\Amount;
 use DOMDocument;
 use DOMElement;
 
@@ -233,13 +235,18 @@ class XmlValidator
             return [];
         }
 
-        $lineExtValue = (float) $lineExt->item(0)->nodeValue;
-        $taxValue = (float) $taxTotal->item(0)->nodeValue;
-        $taxInclValue = (float) $taxIncl->item(0)->nodeValue;
+        try {
+            [$net, $tax, $gross] = array_map(
+                fn (\DOMNodeList $nodes) => Amount::of((string) $nodes->item(0)?->nodeValue),
+                [$lineExt, $taxTotal, $taxIncl]
+            );
+        } catch (InvoiceException $e) {
+            return [$e->getMessage()];
+        }
 
-        $expected = round($lineExtValue + $taxValue, 2);
-        if (abs($expected - $taxInclValue) > 0.01) {
-            return ["Tax inclusive amount ({$taxInclValue}) does not match line extension ({$lineExtValue}) + tax ({$taxValue})"];
+        // Exact, in hundredths: the total with VAT is the total without it plus the VAT (BR-CO-15)
+        if ($gross->hundredths !== $net->hundredths + $tax->hundredths) {
+            return ["Tax inclusive amount ({$gross}) does not match line extension ({$net}) + tax ({$tax})"];
         }
 
         return [];
