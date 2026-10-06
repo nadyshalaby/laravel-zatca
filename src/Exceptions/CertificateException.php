@@ -31,9 +31,17 @@ class CertificateException extends ZatcaException
     /**
      * CSR generation failed.
      */
-    public static function csrGenerationFailed(string $reason): static
+    public static function csrGenerationFailed(string $reason, ?\Throwable $cause = null): static
     {
-        return new static("Failed to generate CSR: {$reason}");
+        return new static("Failed to generate CSR: {$reason}", 0, $cause);
+    }
+
+    /**
+     * The certificate decodes, but its expiry date does not.
+     */
+    public static function unreadableExpiry(?\Throwable $cause = null): static
+    {
+        return new static('Invalid certificate: its expiry date cannot be read', 0, $cause);
     }
 
     /**

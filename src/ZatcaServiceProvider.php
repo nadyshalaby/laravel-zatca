@@ -45,12 +45,14 @@ class ZatcaServiceProvider extends ServiceProvider
             return new ZatcaManager($app);
         });
 
-        // Register API client
-        $this->app->singleton(ApiClientInterface::class, function ($app) {
+        // Register API client: one instance on the configured environment, whether it is asked for by its
+        // interface or, as the commands do, by its class
+        $this->app->singleton(ZatcaClient::class, function ($app) {
             return new ZatcaClient(
                 config('zatca.environment', 'sandbox')
             );
         });
+        $this->app->singleton(ApiClientInterface::class, fn ($app) => $app->make(ZatcaClient::class));
 
         // Register CSR generator
         $this->app->singleton(CsrGenerator::class, function ($app) {

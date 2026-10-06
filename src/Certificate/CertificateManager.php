@@ -7,6 +7,9 @@ use Corecave\Zatca\Exceptions\CertificateException;
 use Corecave\Zatca\Models\ZatcaCertificate;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\File;
+use phpseclib3\Crypt\EC;
+use phpseclib3\Exception\NoKeyLoadedException;
+use phpseclib3\File\X509;
 
 class CertificateManager
 {
@@ -222,19 +225,36 @@ class CertificateManager
      */
     public function validateKeyPair(string $certificate, string $privateKey): bool
     {
-        try {
-            $cert = new Certificate(
-                new CertificateOrigin('validation'),
-                new CertificateCredentials($certificate, $privateKey, '')
-            );
+        $certificatePublicKey = $this->certificatePublicKey($certificate);
 
-            // Try to get public key from cert and compare with derived public key
-            $certPublicKey = $cert->getPublicKey();
-
-            return ! empty($certPublicKey);
-        } catch (\Exception $e) {
+        if ($certificatePublicKey === null) {
             return false;
         }
+
+        // The pair matches when the certificate carries the public half of this very private key
+        try {
+            $keyPublicKey = EC::loadPrivateKey($privateKey)->getPublicKey()->toString('PKCS8');
+        } catch (NoKeyLoadedException $e) {
+            return false;
+        }
+
+        return hash_equals($certificatePublicKey, $keyPublicKey);
+    }
+
+    /**
+     * The public key a certificate carries, in PKCS8, or null when the text is not a certificate.
+     */
+    protected function certificatePublicKey(string $certificate): ?string
+    {
+        $x509 = new X509;
+
+        if ($x509->loadX509($certificate) === false) {
+            return null;
+        }
+
+        $publicKey = $x509->getPublicKey();
+
+        return $publicKey === false ? null : $publicKey->toString('PKCS8');
     }
 
     /**

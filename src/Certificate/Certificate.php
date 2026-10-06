@@ -3,7 +3,9 @@
 namespace Corecave\Zatca\Certificate;
 
 use Carbon\Carbon;
+use Carbon\Exceptions\InvalidFormatException;
 use Corecave\Zatca\Contracts\CertificateInterface;
+use Corecave\Zatca\Exceptions\CertificateException;
 use phpseclib3\Crypt\EC;
 use phpseclib3\File\X509;
 
@@ -283,18 +285,38 @@ class Certificate implements CertificateInterface
     }
 
     /**
-     * Read the notAfter date from the certificate, or null when the certificate cannot be parsed.
+     * Read the notAfter date from the certificate, or null when the body is not a certificate at all.
+     *
+     * @throws CertificateException when the certificate decodes but its expiry date does not
      */
     protected function readExpiryFromCertificate(): ?Carbon
     {
         try {
             $certData = (new X509)->loadX509($this->getCertificatePem());
-            $notAfter = $certData['tbsCertificate']['validity']['notAfter'] ?? [];
-            $time = $notAfter['utcTime'] ?? $notAfter['generalTime'] ?? null;
-
-            return $time === null ? null : Carbon::parse($time);
         } catch (\Exception $e) {
+            throw CertificateException::unreadableExpiry($e);
+        }
+
+        if ($certData === false) {
             return null;
+        }
+
+        $notAfter = $certData['tbsCertificate']['validity']['notAfter'] ?? [];
+        $time = $notAfter['utcTime'] ?? $notAfter['generalTime'] ?? null;
+
+        if ($time === null) {
+            return null;
+        }
+
+        // phpseclib hands an undecodable time over as false, which Carbon would read as 1970
+        if ($time === false) {
+            throw CertificateException::unreadableExpiry();
+        }
+
+        try {
+            return Carbon::parse($time);
+        } catch (InvalidFormatException $e) {
+            throw CertificateException::unreadableExpiry($e);
         }
     }
 

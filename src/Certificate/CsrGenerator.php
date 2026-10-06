@@ -34,7 +34,7 @@ class CsrGenerator
         try {
             return $this->generateKeyAndRequest($config);
         } catch (\Exception $e) {
-            throw CertificateException::csrGenerationFailed($e->getMessage());
+            throw CertificateException::csrGenerationFailed($e->getMessage(), $e);
         }
     }
 
@@ -51,31 +51,29 @@ class CsrGenerator
         // Create OpenSSL config for ZATCA-compliant CSR
         $opensslConfig = $this->buildOpensslConfig($config);
 
-        // Write temporary config file
+        // Write temporary config file, removed however the request ends
         $configFile = tempnam(sys_get_temp_dir(), 'zatca_csr_');
         file_put_contents($configFile, $opensslConfig);
 
-        $privateKeyResource = $this->createPrivateKey($configFile);
+        try {
+            $privateKeyResource = $this->createPrivateKey($configFile);
 
-        // Export private key
-        openssl_pkey_export($privateKeyResource, $privateKey);
+            // Export private key
+            openssl_pkey_export($privateKeyResource, $privateKey);
 
-        // Get public key
-        $keyDetails = openssl_pkey_get_details($privateKeyResource);
-        $publicKey = $keyDetails['key'];
+            // Get public key
+            $keyDetails = openssl_pkey_get_details($privateKeyResource);
 
-        $csr = $this->createCsr($config, $privateKeyResource, $configFile);
-
-        // Clean up temp file
-        if (is_file($configFile)) {
-            unlink($configFile);
+            return [
+                'csr' => $this->createCsr($config, $privateKeyResource, $configFile),
+                'private_key' => $privateKey,
+                'public_key' => $keyDetails['key'],
+            ];
+        } finally {
+            if (is_file($configFile)) {
+                unlink($configFile);
+            }
         }
-
-        return [
-            'csr' => $csr,
-            'private_key' => $privateKey,
-            'public_key' => $publicKey,
-        ];
     }
 
     /**

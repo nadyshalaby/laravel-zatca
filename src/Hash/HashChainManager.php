@@ -3,6 +3,7 @@
 namespace Corecave\Zatca\Hash;
 
 use Corecave\Zatca\Models\ZatcaInvoice;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -137,22 +138,14 @@ class HashChainManager
      */
     public function verifyChain(?int $fromIcv = null, ?int $toIcv = null): array
     {
-        $query = ZatcaInvoice::orderBy('icv');
-
-        if ($fromIcv !== null) {
-            $query->where('icv', '>=', $fromIcv);
-        }
-
-        if ($toIcv !== null) {
-            $query->where('icv', '<=', $toIcv);
-        }
-
-        $invoices = $query->get();
         $errors = [];
-        $previousHash = $this->getInitialHash();
+        $checked = 0;
+        $previousHash = $this->hashBefore($fromIcv);
 
-        foreach ($invoices as $invoice) {
-            // Check if previous hash matches
+        // Read by counter in bounded chunks, so a long chain never sits in memory whole
+        foreach ($this->invoicesBetween($fromIcv, $toIcv)->lazyById(500, 'icv') as $invoice) {
+            $checked++;
+
             if ($invoice->previous_hash !== $previousHash) {
                 $errors[] = [
                     'icv' => $invoice->icv,
@@ -167,10 +160,37 @@ class HashChainManager
         }
 
         return [
-            'valid' => empty($errors),
-            'checked' => $invoices->count(),
+            'valid' => $errors === [],
+            'checked' => $checked,
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * The hash the first invoice of a range must name: the hash of the highest counter below it, or the
+     * initial hash when the range starts the chain or the invoice below it has no hash.
+     */
+    protected function hashBefore(?int $fromIcv): string
+    {
+        if ($fromIcv === null) {
+            return $this->getInitialHash();
+        }
+
+        $hash = ZatcaInvoice::where('icv', '<', $fromIcv)->orderByDesc('icv')->value('hash');
+
+        return $hash ?? $this->getInitialHash();
+    }
+
+    /**
+     * The invoices whose counters fall in the range, either end left open when not given.
+     *
+     * @return Builder<ZatcaInvoice>
+     */
+    protected function invoicesBetween(?int $fromIcv, ?int $toIcv): Builder
+    {
+        return ZatcaInvoice::query()
+            ->when($fromIcv !== null, fn (Builder $query) => $query->where('icv', '>=', $fromIcv))
+            ->when($toIcv !== null, fn (Builder $query) => $query->where('icv', '<=', $toIcv));
     }
 
     /**
