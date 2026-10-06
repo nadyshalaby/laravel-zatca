@@ -75,16 +75,6 @@ class CertificateManager
     }
 
     /**
-     * Get all certificates.
-     */
-    public function all(): array
-    {
-        return ZatcaCertificate::all()
-            ->map(fn ($model) => $this->modelToCertificate($model))
-            ->toArray();
-    }
-
-    /**
      * Check if an active production certificate exists.
      */
     public function hasActiveProductionCertificate(): bool
@@ -280,35 +270,5 @@ class CertificateManager
         $cert = new Certificate($origin, new CertificateCredentials($certificate, $privateKey, $secret));
 
         return $this->store($cert);
-    }
-
-    /**
-     * Export a certificate to files.
-     */
-    public function export(string $type, string $directory): array
-    {
-        $certificate = $this->getActive($type);
-
-        if (! $certificate) {
-            throw CertificateException::notFound($type);
-        }
-
-        if (! File::isDirectory($directory)) {
-            File::makeDirectory($directory, 0755, true);
-        }
-
-        $certPath = "{$directory}/{$type}_certificate.pem";
-        $keyPath = "{$directory}/{$type}_private_key.pem";
-
-        File::put($certPath, $certificate->getCertificatePem());
-        File::put($keyPath, $certificate->getPrivateKey());
-
-        // Set restrictive permissions on private key
-        chmod($keyPath, 0600);
-
-        return [
-            'certificate' => $certPath,
-            'private_key' => $keyPath,
-        ];
     }
 }

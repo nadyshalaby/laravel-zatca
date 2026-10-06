@@ -4,7 +4,6 @@ namespace Corecave\Zatca\Hash;
 
 use Corecave\Zatca\Models\ZatcaInvoice;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -224,15 +223,5 @@ class HashChainManager
     public function isIcvUsed(int $icv): bool
     {
         return ZatcaInvoice::where('icv', $icv)->exists();
-    }
-
-    /**
-     * Get invoices in a date range.
-     */
-    public function getInvoicesInRange(string $startDate, string $endDate): Collection
-    {
-        return ZatcaInvoice::whereBetween('created_at', [$startDate, $endDate])
-            ->orderBy('icv')
-            ->get();
     }
 }
