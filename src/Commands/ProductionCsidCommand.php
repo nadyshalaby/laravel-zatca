@@ -105,7 +105,7 @@ class ProductionCsidCommand extends Command
 
         if ($productionCert->getExpiresAt()) {
             $this->components->twoColumnDetail('Expires', $productionCert->getExpiresAt()->format('Y-m-d H:i:s'));
-            $this->components->twoColumnDetail('Days Until Expiry', (string) $productionCert->getExpiresAt()->diffInDays(now()));
+            $this->components->twoColumnDetail('Days Until Expiry', (string) now()->diffInDays($productionCert->getExpiresAt()));
         }
 
         $this->newLine();

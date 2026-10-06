@@ -161,7 +161,8 @@ class Certificate implements CertificateInterface
             return false;
         }
 
-        return $this->expiresAt->diffInDays(Carbon::now()) <= $days;
+        // Carbon 3 counts signed days from now to the expiry, so one already expired counts as expiring
+        return Carbon::now()->diffInDays($this->expiresAt) <= $days;
     }
 
     public function isProduction(): bool

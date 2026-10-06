@@ -121,7 +121,8 @@ class ZatcaCertificate extends Model
             return false;
         }
 
-        return $this->expires_at->diffInDays(now()) <= $days;
+        // Carbon 3 counts signed days from now to the expiry, so one already expired counts as expiring
+        return now()->diffInDays($this->expires_at) <= $days;
     }
 
     /**

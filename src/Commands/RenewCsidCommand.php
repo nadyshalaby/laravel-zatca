@@ -74,7 +74,8 @@ class RenewCsidCommand extends Command
     protected function confirmRenewal(CertificateInterface $currentCert): bool
     {
         // Check expiry
-        $daysUntilExpiry = $currentCert->getExpiresAt()?->diffInDays(now()) ?? 0;
+        $expiresAt = $currentCert->getExpiresAt();
+        $daysUntilExpiry = $expiresAt === null ? 0 : now()->diffInDays($expiresAt);
 
         $this->components->twoColumnDetail('Current Certificate Expires', $currentCert->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'Unknown');
         $this->components->twoColumnDetail('Days Until Expiry', (string) $daysUntilExpiry);
