@@ -84,7 +84,6 @@ class ComplianceChecks
         try {
             $invoice = $this->sampleInvoice($run['sample'], $run['number']);
             $signed = $this->signer->sign($invoice, $certificate);
-            $invoice->setHash($signed->hash);
             $response = $client->submitComplianceInvoice($signed->signedXml, $signed->hash, $invoice->getUuid());
 
             return new ComplianceCheck($run['sample'], $response['validationResults']['status'] ?? 'UNKNOWN', $response['validationResults']['errorMessages'] ?? []);

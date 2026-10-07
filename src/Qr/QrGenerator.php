@@ -37,7 +37,7 @@ class QrGenerator
         $tags = [
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
-            3 => $this->formatTimestamp($invoice->getIssueDate()),
+            3 => $this->issueTimestamp($invoice->getIssueDate()),
             4 => $invoice->getTotalWithVat(),
             5 => $invoice->getTotalVat(),
             6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
@@ -81,6 +81,16 @@ class QrGenerator
     protected function formatTimestamp(\DateTimeInterface $date): string
     {
         return $date->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
+     * A phase 2 code's tag 3: the XML's issue date and issue time joined, as written there and with no
+     * zone, since ZATCA warns that the time does not match the issue time (KSA-25) when a Z follows it
+     * (invoiceTimeStamp_QRCODE_INVALID in the sandbox, 2026-10-07).
+     */
+    protected function issueTimestamp(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d\TH:i:s');
     }
 
     /**
@@ -226,13 +236,13 @@ class QrGenerator
     }
 
     /**
-     * Check if timestamp is valid ISO 8601 format.
+     * Check if timestamp is valid ISO 8601 format, with a Z as a phase 1 code writes it or without one as
+     * a phase 2 code does.
      */
     protected function isValidTimestamp(string $timestamp): bool
     {
-        $date = \DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $timestamp);
-
-        return $date !== false;
+        return \DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $timestamp) !== false
+            || \DateTime::createFromFormat('Y-m-d\TH:i:s', $timestamp) !== false;
     }
 
     /**

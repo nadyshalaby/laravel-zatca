@@ -22,10 +22,12 @@ final readonly class ComplianceCheck
     ) {}
 
     /**
-     * Whether ZATCA passed the sample: a warning or an error does not.
+     * Whether ZATCA passed the sample: a pass, or a warning, since ZATCA reports or clears a document
+     * whose only messages are warnings (REPORTED and CLEARED with the status WARNING in the sandbox,
+     * 2026-10-07); an error does not.
      */
     public function isPassed(): bool
     {
-        return $this->failure === null && strtoupper((string) $this->status) === 'PASS';
+        return $this->failure === null && in_array(strtoupper((string) $this->status), ['PASS', 'WARNING'], true);
     }
 }
