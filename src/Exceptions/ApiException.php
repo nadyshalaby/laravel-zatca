@@ -14,7 +14,7 @@ class ApiException extends ZatcaException
     /** @var array<array-key, mixed> */
     protected array $zatcaWarnings = [];
 
-    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, ?ResponseInterface $response = null)
+    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, ?ResponseInterface $response = null) // law-exception: PHP's Exception takes its first three, and ZATCA's answer is the fourth
     {
         parent::__construct($message, $code, $previous);
         $this->response = $response;

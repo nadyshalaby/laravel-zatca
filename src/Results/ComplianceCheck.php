@@ -14,7 +14,7 @@ final readonly class ComplianceCheck
      * @param  array{type: string, subtype: string}  $sample
      * @param  list<array{message: string, code: string}>  $errors
      */
-    public function __construct(
+    public function __construct(// law-exception: a data class takes one promoted parameter per field
         public array $sample,
         public ?string $status,
         public array $errors = [],

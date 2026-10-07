@@ -10,7 +10,7 @@ class ValidationException extends ZatcaException
     /**
      * @param  array<array-key, string>  $errors
      */
-    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, array $errors = [])
+    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, array $errors = []) // law-exception: PHP's Exception takes its first three, and the errors found are the fourth
     {
         parent::__construct($message, $code, $previous);
         $this->context = ['errors' => $errors];
