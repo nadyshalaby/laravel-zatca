@@ -5,13 +5,9 @@ namespace Corecave\Zatca\Commands;
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Client\ZatcaClient;
-use Corecave\Zatca\Contracts\InvoiceInterface;
-use Corecave\Zatca\Hash\HashChainManager;
-use Corecave\Zatca\Invoice\ComplianceSample;
-use Corecave\Zatca\Invoice\InvoiceBuilder;
-use Corecave\Zatca\Xml\InvoiceSigner;
+use Corecave\Zatca\Invoice\ComplianceChecks;
+use Corecave\Zatca\Results\ComplianceCheck;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 class ComplianceCommand extends Command
 {
@@ -35,7 +31,7 @@ class ComplianceCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle(CertificateManager $certManager, ZatcaClient $client, InvoiceSigner $invoiceSigner): int
+    public function handle(CertificateManager $certManager, ZatcaClient $client, ComplianceChecks $checks): int
     {
         $this->info('Starting ZATCA Compliance Process...');
         $this->newLine();
@@ -73,13 +69,13 @@ class ComplianceCommand extends Command
         $complianceCert = Certificate::fromApiResponse($response, $csrData['private_key'], 'compliance');
         $certManager->store($complianceCert);
 
-        return $this->completeCompliance($client, $invoiceSigner, $complianceCert);
+        return $this->completeCompliance($client, $checks, $complianceCert);
     }
 
     /**
      * Run the compliance checks unless they are skipped, and show the next steps.
      */
-    protected function completeCompliance(ZatcaClient $client, InvoiceSigner $invoiceSigner, Certificate $complianceCert): int
+    protected function completeCompliance(ZatcaClient $client, ComplianceChecks $checks, Certificate $complianceCert): int
     {
         $this->info('Compliance certificate stored.');
         $this->newLine();
@@ -90,7 +86,7 @@ class ComplianceCommand extends Command
 
             $client->setCertificate($complianceCert);
 
-            $checksResult = $this->runComplianceChecks($client, $invoiceSigner, $complianceCert);
+            $checksResult = $this->runComplianceChecks($client, $checks, $complianceCert);
 
             if (! $checksResult) {
                 $this->error('Compliance checks failed.');
@@ -175,36 +171,19 @@ class ComplianceCommand extends Command
     /**
      * Run compliance checks by submitting sample invoices.
      */
-    protected function runComplianceChecks(ZatcaClient $client, InvoiceSigner $invoiceSigner, Certificate $certificate): bool
+    protected function runComplianceChecks(ZatcaClient $client, ComplianceChecks $checks, Certificate $certificate): bool
     {
         $passed = 0;
         $failed = 0;
+        $results = $checks->forDevice((string) $this->deviceId)->run($client, $certificate, config('zatca.csr.invoice_types', '1100'));
 
-        foreach ($this->complianceSamples() as $index => $sample) {
-            $this->line("  Submitting {$sample['type']} {$sample['subtype']}...");
+        foreach ($results as $check) {
+            $this->line("  Submitting {$check->sample['type']} {$check->sample['subtype']}...");
+            $this->reportCheck($check);
 
-            try {
-                // Build sample invoice
-                $invoice = $this->buildSampleInvoice($sample, $index + 1);
-
-                // Generate XML, hash and sign
-                $signed = $invoiceSigner->sign($invoice, $certificate);
-                $invoice->setHash($signed->hash);
-
-                // Submit for compliance check
-                $response = $client->submitComplianceInvoice($signed->signedXml, $signed->hash, $invoice->getUuid());
-                $status = $response['validationResults']['status'] ?? 'UNKNOWN';
-
-                if (strtoupper($status) === 'PASS') {
-                    $this->info('    PASS');
-                    $passed++;
-                } else {
-                    $this->error("    FAIL: {$status}");
-                    $this->displayValidationErrors($response);
-                    $failed++;
-                }
-            } catch (\Exception $e) {
-                $this->reportFailure('    ERROR: ', $e);
+            if ($check->isPassed()) {
+                $passed++;
+            } else {
                 $failed++;
             }
         }
@@ -217,107 +196,18 @@ class ComplianceCommand extends Command
     }
 
     /**
-     * Where the device's chain stands, for its samples: its next counter and its previous hash, read under its
-     * lock and let go at once, since a sample is never recorded in the chain.
-     *
-     * @return array{0: int, 1: string}
+     * One sample's answer: passed, failed with ZATCA's status and messages, or never answered.
      */
-    protected function chainPosition(): array
+    protected function reportCheck(ComplianceCheck $check): void
     {
-        $chain = app(HashChainManager::class)->forDevice((string) $this->deviceId);
-
-        return DB::transaction(fn (): array => [$chain->getNextIcv(), $chain->getPreviousInvoiceHash()]);
-    }
-
-    /**
-     * The sample invoices the configured invoice types call for.
-     *
-     * @return list<array{type: string, subtype: string}>
-     */
-    protected function complianceSamples(): array
-    {
-        $invoiceTypes = config('zatca.csr.invoice_types', '1100');
-
-        $sampleInvoices = [];
-
-        // B2C samples (if supported)
-        if (in_array($invoiceTypes, ['1000', '1100'])) {
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'invoice'];
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'credit_note'];
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'debit_note'];
-        }
-
-        // B2B samples (if supported)
-        if (in_array($invoiceTypes, ['0100', '1100'])) {
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'invoice'];
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'credit_note'];
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'debit_note'];
-        }
-
-        return $sampleInvoices;
-    }
-
-    /**
-     * Build a sample invoice for compliance testing.
-     *
-     * @param  array{type: string, subtype: string}  $sample
-     */
-    protected function buildSampleInvoice(array $sample, int $number): InvoiceInterface
-    {
-        $position = $this->chainPosition();
-        $builder = $this->sampleBuilder($sample);
-        $builder->setInvoiceNumber("SME0000{$number}")
-            ->setIcv($position[0])
-            ->setPreviousInvoiceHash($position[1]);
-
-        // Add buyer for standard invoices
-        if ($sample['type'] !== 'simplified') {
-            $builder->setBuyer([
-                'name' => 'Test Buyer Company',
-                'vat_number' => '300000000000003',
-                'registration_number' => '1234567890',
-                'address' => [
-                    'street' => 'Test Street',
-                    'building' => '1234',
-                    'city' => 'Riyadh',
-                    'district' => 'Test District',
-                    'postal_code' => '12345',
-                    'country' => 'SA',
-                ],
-            ]);
-        }
-
-        $builder->addLineItem(['name' => 'Test Product'] + ComplianceSample::LINE_ITEM)
-            ->setVatGroups(ComplianceSample::VAT_GROUPS)
-            ->setTotals(...ComplianceSample::TOTALS);
-
-        return $builder->build();
-    }
-
-    /**
-     * A builder for the sample's type and subtype; a credit or debit note refers to the original invoice with its reason.
-     *
-     * @param  array{type: string, subtype: string}  $sample
-     */
-    protected function sampleBuilder(array $sample): InvoiceBuilder
-    {
-        $isSimplified = $sample['type'] === 'simplified';
-
-        if ($sample['subtype'] === 'credit_note') {
-            $builder = InvoiceBuilder::creditNote($isSimplified);
-            $builder->setOriginalInvoice('SME00001');
-            $builder->setReason('Compliance test credit note');
-        } elseif ($sample['subtype'] === 'debit_note') {
-            $builder = InvoiceBuilder::debitNote($isSimplified);
-            $builder->setOriginalInvoice('SME00001');
-            $builder->setReason('Compliance test debit note');
+        if ($check->failure !== null) {
+            $this->reportFailure('    ERROR: ', $check->failure);
+        } elseif ($check->isPassed()) {
+            $this->info('    PASS');
         } else {
-            $builder = $isSimplified
-                ? InvoiceBuilder::simplified()
-                : InvoiceBuilder::standard();
+            $this->error("    FAIL: {$check->status}");
+            $this->displayValidationErrors(['validationResults' => ['errorMessages' => $check->errors]]);
         }
-
-        return $builder;
     }
 
     /**
