@@ -30,6 +30,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ZatcaInvoice extends Model
 {
+    use UsesZatcaConnection;
+
     /**
      * The table associated with the model.
      */

@@ -23,6 +23,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ZatcaCertificate extends Model
 {
+    use UsesZatcaConnection;
+
     /**
      * The table associated with the model.
      */

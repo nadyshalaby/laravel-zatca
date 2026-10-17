@@ -9,7 +9,6 @@ use Corecave\Zatca\Hash\HashChainManager;
 use Corecave\Zatca\Results\ComplianceCheck;
 use Corecave\Zatca\Xml\InvoiceSigner;
 use Exception;
-use Illuminate\Support\Facades\DB;
 
 /**
  * The compliance checks ZATCA asks of a device before its production certificate: a sample of each
@@ -135,7 +134,7 @@ class ComplianceChecks
     {
         $chain = $this->chains->forDevice($this->deviceId);
 
-        return DB::transaction(fn (): array => [$chain->getNextIcv(), $chain->getPreviousInvoiceHash()]);
+        return $chain->connection()->transaction(fn (): array => [$chain->getNextIcv(), $chain->getPreviousInvoiceHash()]);
     }
 
     /**

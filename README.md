@@ -25,7 +25,7 @@ This package supports Phase 2 requirements including:
 The package is on Packagist:
 
 ```bash
-composer require corecave/laravel-zatca:^2.0
+composer require corecave/laravel-zatca:^2.1
 ```
 
 Publish the configuration file:
@@ -39,6 +39,8 @@ The package ships no migrations. Each workshop keeps its own certificates, invoi
 ```bash
 php artisan tenants:migrate
 ```
+
+An app whose one seller keeps its device centrally, while a tenant's connection is the default, keeps the two tables with its central migrations instead and names its central connection in `ZATCA_DB_CONNECTION`: the certificates, the chain and the chain's lock all use it.
 
 ## Configuration
 
@@ -66,6 +68,9 @@ ZATCA_CSR_ORGANIZATION="Your Company Name"
 ZATCA_CSR_ORGANIZATION_UNIT="Main Branch"
 ZATCA_CSR_COMMON_NAME="Your Company Name"
 ZATCA_INVOICE_TYPES=1100
+
+# Database connection for the certificates and the chain (optional; empty is the default connection)
+ZATCA_DB_CONNECTION=
 
 # Debug (optional)
 ZATCA_DEBUG_ENABLED=true
@@ -436,6 +441,12 @@ try {
 | `BR-CL-KSA-14`     | QR Code exceeds 1000 chars | Reduce invoice data or check QR generation                                 |
 
 ## Changelog
+
+### v2.1.0 (2026-10-17)
+
+#### Added
+
+- `zatca.connection` (`ZATCA_DB_CONNECTION`): the connection `ZatcaCertificate` and `ZatcaInvoice` use and `HashChainManager` takes the chain's lock on, through the new `HashChainManager::connection()`; the compliance samples read their place in the chain there too. Empty, as before, everything stays on the default connection.
 
 ### v2.0.0 (2026-10-17)
 

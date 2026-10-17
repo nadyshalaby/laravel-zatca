@@ -4,8 +4,8 @@ namespace Corecave\Zatca\Hash;
 
 use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Models\ZatcaInvoice;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -39,7 +39,7 @@ class HashChainManager
      */
     public function getNextIcv(): int
     {
-        $this->lock->acquire(DB::connection(), $this->device());
+        $this->lock->acquire($this->connection(), $this->device());
 
         return (int) $this->invoices()->max('icv') + 1;
     }
@@ -55,6 +55,15 @@ class HashChainManager
         $hash = $this->invoices()->orderByDesc('icv')->value('hash');
 
         return is_string($hash) && $hash !== '' ? $hash : $this->getInitialHash();
+    }
+
+    /**
+     * The connection the chain is kept on, the invoices' own (`zatca.connection`, else the default): its
+     * lock is taken there, so the transaction that records an invoice must be open on it.
+     */
+    public function connection(): ConnectionInterface
+    {
+        return (new ZatcaInvoice)->getConnection();
     }
 
     /**

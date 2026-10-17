@@ -279,6 +279,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Database Connection
+    |--------------------------------------------------------------------------
+    |
+    | The connection the certificates and the invoice chain are kept on, and the chain's lock is taken
+    | on. Empty, they use the default connection, which a multi-tenant app switches to each tenant's; an
+    | app whose one seller keeps its device centrally names its central connection here.
+    |
+    */
+    'connection' => env('ZATCA_DB_CONNECTION'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Database Tables
     |--------------------------------------------------------------------------
     |
