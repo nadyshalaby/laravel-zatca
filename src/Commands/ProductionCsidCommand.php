@@ -4,15 +4,19 @@ namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
-use Corecave\Zatca\Contracts\ApiClientInterface;
+use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Contracts\CertificateInterface;
 use Illuminate\Console\Command;
 
 class ProductionCsidCommand extends Command
 {
+    use ChoosesDevice, ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
     protected $signature = 'zatca:production-csid
+                            {--device= : The ZATCA device the production certificate is for}
                             {--request-id= : Compliance request ID (if not stored)}';
 
     /**
@@ -23,12 +27,16 @@ class ProductionCsidCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle(CertificateManager $certManager, ApiClientInterface $client): int
+    public function handle(CertificateManager $certManager, ZatcaClient $client): int
     {
         $this->info('Requesting Production CSID...');
         $this->newLine();
+        $certManager = $this->deviceCertificates($certManager);
 
-        // Get compliance certificate
+        if ($certManager === null) {
+            return self::FAILURE;
+        }
+
         $complianceCert = $certManager->getActive('compliance');
 
         if (! $complianceCert) {
@@ -38,55 +46,28 @@ class ProductionCsidCommand extends Command
             return self::FAILURE;
         }
 
-        // Get request ID
-        $requestId = $this->option('request-id') ?? $complianceCert->getRequestId();
+        return $this->requestProduction($certManager, $client, $complianceCert);
+    }
 
-        if (empty($requestId)) {
-            $requestId = $this->ask('Enter the Compliance Request ID');
-        }
+    /**
+     * Ask ZATCA for the production certificate under the compliance one's request id, and store it as the device's.
+     */
+    protected function requestProduction(CertificateManager $certManager, ZatcaClient $client, CertificateInterface $complianceCert): int
+    {
+        $requestId = $this->complianceRequestId($complianceCert);
 
         $this->components->twoColumnDetail('Compliance Request ID', $requestId);
         $this->newLine();
 
         try {
-            // Use compliance certificate for authentication (as per ZATCA spec)
             $client->setCertificate($complianceCert);
             $response = $client->requestProductionCsid($requestId);
 
-            $this->info('Production CSID received!');
-            $this->newLine();
-
-            // Store production certificate
-            $productionCert = Certificate::fromApiResponse(
-                $response,
-                $complianceCert->getPrivateKey(),
-                'production'
-            );
-
-            $certManager->store($productionCert);
-
-            // Display certificate info
-            $this->components->twoColumnDetail('Certificate Type', 'Production');
-            $this->components->twoColumnDetail('Request ID', $response['requestID'] ?? 'N/A');
-            $this->components->twoColumnDetail('Token Type', $response['tokenType'] ?? 'N/A');
-
-            if ($productionCert->getExpiresAt()) {
-                $this->components->twoColumnDetail('Expires', $productionCert->getExpiresAt()->format('Y-m-d H:i:s'));
-                $this->components->twoColumnDetail('Days Until Expiry', (string) $productionCert->getExpiresAt()->diffInDays(now()));
-            }
-
-            $this->newLine();
-            $this->info('Production certificate stored and activated!');
-            $this->newLine();
-
-            $this->info('You can now start issuing invoices:');
-            $this->line('  - Use Zatca::report() for simplified (B2C) invoices');
-            $this->line('  - Use Zatca::clear() for standard (B2B) invoices');
-            $this->line('  - Or use Zatca::process() to automatically determine the type');
+            $this->storeProductionCertificate($certManager, $response, $complianceCert);
 
             return self::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Failed to get Production CSID: '.$e->getMessage());
+            $this->reportFailure('Failed to get Production CSID: ', $e);
 
             if (str_contains($e->getMessage(), 'compliance')) {
                 $this->warn('Make sure you have completed all compliance checks.');
@@ -94,5 +75,58 @@ class ProductionCsidCommand extends Command
 
             return self::FAILURE;
         }
+    }
+
+    /**
+     * The compliance request ID from the option or the compliance certificate, asked for when neither has one.
+     */
+    protected function complianceRequestId(CertificateInterface $complianceCert): ?string
+    {
+        $requestId = $this->option('request-id') ?? $complianceCert->getRequestId();
+
+        if (empty($requestId)) {
+            $requestId = $this->ask('Enter the Compliance Request ID');
+        }
+
+        return $requestId;
+    }
+
+    /**
+     * Store the production certificate ZATCA issued, and show it with what to do next.
+     *
+     * @param  array<string, mixed>  $response
+     */
+    protected function storeProductionCertificate(CertificateManager $certManager, array $response, CertificateInterface $complianceCert): void
+    {
+        $this->info('Production CSID received!');
+        $this->newLine();
+
+        // Store production certificate
+        $productionCert = Certificate::fromApiResponse(
+            $response,
+            $complianceCert->getPrivateKey(),
+            'production'
+        );
+
+        $certManager->store($productionCert);
+
+        // Display certificate info
+        $this->components->twoColumnDetail('Certificate Type', 'Production');
+        $this->components->twoColumnDetail('Request ID', $response['requestID'] ?? 'N/A');
+        $this->components->twoColumnDetail('Token Type', $response['tokenType'] ?? 'N/A');
+
+        if ($productionCert->getExpiresAt()) {
+            $this->components->twoColumnDetail('Expires', $productionCert->getExpiresAt()->format('Y-m-d H:i:s'));
+            $this->components->twoColumnDetail('Days Until Expiry', (string) now()->diffInDays($productionCert->getExpiresAt()));
+        }
+
+        $this->newLine();
+        $this->info('Production certificate stored and activated!');
+        $this->newLine();
+
+        $this->info('You can now start issuing invoices:');
+        $this->line('  - Use Zatca::report() for simplified (B2C) invoices');
+        $this->line('  - Use Zatca::clear() for standard (B2B) invoices');
+        $this->line('  - Or use Zatca::process() to automatically determine the type');
     }
 }

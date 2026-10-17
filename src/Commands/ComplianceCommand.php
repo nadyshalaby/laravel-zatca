@@ -4,21 +4,20 @@ namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
-use Corecave\Zatca\Certificate\CsrGenerator;
-use Corecave\Zatca\Contracts\ApiClientInterface;
-use Corecave\Zatca\Enums\VatCategory;
-use Corecave\Zatca\Invoice\InvoiceBuilder;
-use Corecave\Zatca\Qr\QrGenerator;
-use Corecave\Zatca\Xml\UblGenerator;
-use Corecave\Zatca\Xml\XmlSigner;
+use Corecave\Zatca\Client\ZatcaClient;
+use Corecave\Zatca\Invoice\ComplianceChecks;
+use Corecave\Zatca\Results\ComplianceCheck;
 use Illuminate\Console\Command;
 
 class ComplianceCommand extends Command
 {
+    use AsksForOtp, ChoosesDevice, ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
     protected $signature = 'zatca:compliance
+                            {--device= : The ZATCA device being onboarded}
                             {--otp= : OTP from FATOORA portal}
                             {--csr= : Path to CSR file}
                             {--private-key= : Path to private key file}
@@ -32,25 +31,20 @@ class ComplianceCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle(
-        CsrGenerator $csrGenerator,
-        CertificateManager $certManager,
-        ApiClientInterface $client,
-        UblGenerator $xmlGenerator,
-        XmlSigner $signer,
-        QrGenerator $qrGenerator
-    ): int {
+    public function handle(CertificateManager $certManager, ZatcaClient $client, ComplianceChecks $checks): int
+    {
         $this->info('Starting ZATCA Compliance Process...');
         $this->newLine();
+        $certManager = $this->deviceCertificates($certManager);
 
-        // Get OTP
-        $otp = $this->option('otp');
-        if (empty($otp)) {
-            $otp = $this->ask('Enter OTP from FATOORA portal');
+        if ($certManager === null) {
+            return self::FAILURE;
         }
 
+        $otp = $this->otp();
+
         // Get or generate CSR
-        $csrData = $this->getCsrData($csrGenerator);
+        $csrData = $this->getCsrData();
 
         if (! $csrData) {
             return self::FAILURE;
@@ -66,7 +60,7 @@ class ComplianceCommand extends Command
             $this->components->twoColumnDetail('Request ID', $response['requestID'] ?? 'N/A');
             $this->newLine();
         } catch (\Exception $e) {
-            $this->error('Failed to get Compliance CSID: '.$e->getMessage());
+            $this->reportFailure('Failed to get Compliance CSID: ', $e);
 
             return self::FAILURE;
         }
@@ -75,6 +69,14 @@ class ComplianceCommand extends Command
         $complianceCert = Certificate::fromApiResponse($response, $csrData['private_key'], 'compliance');
         $certManager->store($complianceCert);
 
+        return $this->completeCompliance($client, $checks, $complianceCert);
+    }
+
+    /**
+     * Run the compliance checks unless they are skipped, and show the next steps.
+     */
+    protected function completeCompliance(ZatcaClient $client, ComplianceChecks $checks, Certificate $complianceCert): int
+    {
         $this->info('Compliance certificate stored.');
         $this->newLine();
 
@@ -84,13 +86,7 @@ class ComplianceCommand extends Command
 
             $client->setCertificate($complianceCert);
 
-            $checksResult = $this->runComplianceChecks(
-                $client,
-                $xmlGenerator,
-                $signer,
-                $qrGenerator,
-                $complianceCert
-            );
+            $checksResult = $this->runComplianceChecks($client, $checks, $complianceCert);
 
             if (! $checksResult) {
                 $this->error('Compliance checks failed.');
@@ -114,8 +110,10 @@ class ComplianceCommand extends Command
 
     /**
      * Get CSR data from file or generate new.
+     *
+     * @return array{csr: string, private_key: string}|null
      */
-    protected function getCsrData(CsrGenerator $generator): ?array
+    protected function getCsrData(): ?array
     {
         $csrPath = $this->option('csr');
         $keyPath = $this->option('private-key');
@@ -127,10 +125,7 @@ class ComplianceCommand extends Command
                 return null;
             }
 
-            return [
-                'csr' => file_get_contents($csrPath),
-                'private_key' => file_get_contents($keyPath),
-            ];
+            return $this->readCsrData($csrPath, $keyPath);
         }
 
         // Check for stored CSR
@@ -139,10 +134,7 @@ class ComplianceCommand extends Command
 
         if (file_exists($storedCsr) && file_exists($storedKey)) {
             if ($this->confirm('Use existing CSR from storage?', true)) {
-                return [
-                    'csr' => file_get_contents($storedCsr),
-                    'private_key' => file_get_contents($storedKey),
-                ];
+                return $this->readCsrData($storedCsr, $storedKey);
             }
         }
 
@@ -151,105 +143,47 @@ class ComplianceCommand extends Command
         $this->call('zatca:generate-csr', ['--save' => true]);
 
         if (file_exists($storedCsr) && file_exists($storedKey)) {
-            return [
-                'csr' => file_get_contents($storedCsr),
-                'private_key' => file_get_contents($storedKey),
-            ];
+            return $this->readCsrData($storedCsr, $storedKey);
         }
 
         return null;
     }
 
     /**
+     * Read a CSR and its private key from their files, or null when either cannot be read.
+     *
+     * @return array{csr: string, private_key: string}|null
+     */
+    protected function readCsrData(string $csrPath, string $keyPath): ?array
+    {
+        $csr = file_get_contents($csrPath);
+        $privateKey = file_get_contents($keyPath);
+
+        if ($csr === false || $privateKey === false) {
+            $this->error('CSR or private key file cannot be read');
+
+            return null;
+        }
+
+        return ['csr' => $csr, 'private_key' => $privateKey];
+    }
+
+    /**
      * Run compliance checks by submitting sample invoices.
      */
-    protected function runComplianceChecks(
-        ApiClientInterface $client,
-        UblGenerator $xmlGenerator,
-        XmlSigner $signer,
-        QrGenerator $qrGenerator,
-        Certificate $certificate
-    ): bool {
-        $invoiceTypes = config('zatca.csr.invoice_types', '1100');
-
-        $sampleInvoices = [];
-
-        // B2C samples (if supported)
-        if (in_array($invoiceTypes, ['1000', '1100'])) {
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'invoice'];
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'credit_note'];
-            $sampleInvoices[] = ['type' => 'simplified', 'subtype' => 'debit_note'];
-        }
-
-        // B2B samples (if supported)
-        if (in_array($invoiceTypes, ['0100', '1100'])) {
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'invoice'];
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'credit_note'];
-            $sampleInvoices[] = ['type' => 'standard', 'subtype' => 'debit_note'];
-        }
-
+    protected function runComplianceChecks(ZatcaClient $client, ComplianceChecks $checks, Certificate $certificate): bool
+    {
         $passed = 0;
         $failed = 0;
+        $results = $checks->forDevice((string) $this->deviceId)->run($client, $certificate, config('zatca.csr.invoice_types', '1100'));
 
-        foreach ($sampleInvoices as $index => $sample) {
-            $this->line("  Submitting {$sample['type']} {$sample['subtype']}...");
+        foreach ($results as $check) {
+            $this->line("  Submitting {$check->sample['type']} {$check->sample['subtype']}...");
+            $this->reportCheck($check);
 
-            try {
-                // Build sample invoice
-                $invoice = $this->buildSampleInvoice($sample, $index + 1);
-
-                // Generate XML
-                $xml = $xmlGenerator->generate($invoice);
-
-                // Generate hash and sign
-                $hash = $signer->generateInvoiceHash($xml);
-                $invoice->setHash($hash);
-
-                $signedXml = $signer->sign(
-                    $xml,
-                    $certificate->getPrivateKey(),
-                    $certificate->getCertificatePem()
-                );
-
-                // Generate QR code for simplified (B2C) invoices
-                // QR code is also needed for compliance check invoices
-                $signatureValue = $signer->getSignatureValue($signedXml);
-                $publicKeyDer = $certificate->getPublicKeyRaw();
-                $certificateSignature = $certificate->getCertificateSignature();
-                $qrCode = $qrGenerator->generate($invoice, $signatureValue, $publicKeyDer, $certificateSignature);
-
-                // Add QR code to XML
-                $signedXml = $xmlGenerator->addQrCode($signedXml, $qrCode);
-
-                // Submit for compliance check
-                $response = $client->submitComplianceInvoice(
-                    $signedXml,
-                    $hash,
-                    $invoice->getUuid()
-                );
-
-                $status = strtoupper($response['validationResults']['status'] ?? 'UNKNOWN');
-                $reportingStatus = $response['reportingStatus'] ?? null;
-                $clearanceStatus = $response['clearanceStatus'] ?? null;
-
-                // Invoice is accepted if status is PASS/WARNING and it was REPORTED or CLEARED
-                $isAccepted = in_array($status, ['PASS', 'WARNING'])
-                    && ($reportingStatus === 'REPORTED' || $clearanceStatus === 'CLEARED');
-
-                if ($status === 'PASS') {
-                    $this->info('    PASS');
-                    $passed++;
-                } elseif ($isAccepted) {
-                    $this->warn("    PASS (with warnings)");
-                    $this->displayValidationWarnings($response);
-                    $passed++;
-                } else {
-                    $this->error("    FAIL: {$status}");
-                    $this->displayValidationErrors($response);
-                    $failed++;
-                }
-            } catch (\Exception $e) {
-                $this->error("    ERROR: {$e->getMessage()}");
+            if ($check->isPassed()) {
+                $passed++;
+            } else {
                 $failed++;
             }
         }
@@ -262,60 +196,24 @@ class ComplianceCommand extends Command
     }
 
     /**
-     * Build a sample invoice for compliance testing.
+     * One sample's answer: passed, failed with ZATCA's status and messages, or never answered.
      */
-    protected function buildSampleInvoice(array $sample, int $number): \Corecave\Zatca\Contracts\InvoiceInterface
+    protected function reportCheck(ComplianceCheck $check): void
     {
-        $isSimplified = $sample['type'] === 'simplified';
-        $isCredit = $sample['subtype'] === 'credit_note';
-        $isDebit = $sample['subtype'] === 'debit_note';
-
-        if ($isCredit) {
-            $builder = InvoiceBuilder::creditNote($isSimplified);
-            $builder->setOriginalInvoice('SME00001');
-            $builder->setReason('Compliance test credit note');
-        } elseif ($isDebit) {
-            $builder = InvoiceBuilder::debitNote($isSimplified);
-            $builder->setOriginalInvoice('SME00001');
-            $builder->setReason('Compliance test debit note');
+        if ($check->failure !== null) {
+            $this->reportFailure('    ERROR: ', $check->failure);
+        } elseif ($check->isPassed()) {
+            $this->info('    PASS');
         } else {
-            $builder = $isSimplified
-                ? InvoiceBuilder::simplified()
-                : InvoiceBuilder::standard();
+            $this->error("    FAIL: {$check->status}");
+            $this->displayValidationErrors(['validationResults' => ['errorMessages' => $check->errors]]);
         }
-
-        $builder->setInvoiceNumber("SME0000{$number}");
-
-        // Add buyer for standard invoices
-        if (! $isSimplified) {
-            $builder->setBuyer([
-                'name' => 'Test Buyer Company',
-                'vat_number' => '300000000000003',
-                'registration_number' => '1234567890',
-                'address' => [
-                    'street' => 'Test Street',
-                    'building' => '1234',
-                    'city' => 'Riyadh',
-                    'district' => 'Test District',
-                    'postal_code' => '12345',
-                    'country' => 'SA',
-                ],
-            ]);
-        }
-
-        $builder->addLineItem([
-            'name' => 'Test Product',
-            'quantity' => 1,
-            'unit_price' => 100.00,
-            'vat_category' => VatCategory::STANDARD,
-            'vat_rate' => 15.00,
-        ]);
-
-        return $builder->build();
     }
 
     /**
      * Display validation errors from response.
+     *
+     * @param  array<string, mixed>  $response  ZATCA's JSON answer
      */
     protected function displayValidationErrors(array $response): void
     {
@@ -323,18 +221,6 @@ class ComplianceCommand extends Command
 
         foreach ($errors as $error) {
             $this->line("      - {$error['message']} ({$error['code']})");
-        }
-    }
-
-    /**
-     * Display validation warnings from response.
-     */
-    protected function displayValidationWarnings(array $response): void
-    {
-        $warnings = $response['validationResults']['warningMessages'] ?? [];
-
-        foreach ($warnings as $warning) {
-            $this->line("      - {$warning['message']} ({$warning['code']})");
         }
     }
 }

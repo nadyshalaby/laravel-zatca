@@ -7,20 +7,44 @@ use Corecave\Zatca\Exceptions\CertificateException;
 use Corecave\Zatca\Models\ZatcaCertificate;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\File;
+use phpseclib3\Crypt\EC;
+use phpseclib3\Exception\NoKeyLoadedException;
+use phpseclib3\File\X509;
 
+/**
+ * A device's certificates. The manager the container holds belongs to no device: `forDevice()` gives the
+ * certificates of the device that signs, and storing or reading one before that is refused.
+ */
 class CertificateManager
 {
+    /** @var array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string} */
     protected array $config;
 
-    protected ?CertificateInterface $cachedCertificate = null;
+    private ?string $deviceId = null;
 
+    /**
+     * @param  array{storage?: string, path?: string, encryption_key?: string|null, auto_renew_days?: int|string}  $config
+     */
     public function __construct(array $config = [])
     {
         $this->config = $config;
     }
 
     /**
-     * Store a certificate.
+     * The certificates of one device.
+     */
+    public function forDevice(string $deviceId): static
+    {
+        $manager = clone $this;
+        $manager->deviceId = $deviceId;
+
+        return $manager;
+    }
+
+    /**
+     * Store a certificate as the device's active one of its type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function store(CertificateInterface $certificate): CertificateInterface
     {
@@ -34,7 +58,9 @@ class CertificateManager
     }
 
     /**
-     * Get the active certificate of a given type.
+     * The device's active certificate of a given type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function getActive(string $type = 'production'): ?CertificateInterface
     {
@@ -62,33 +88,17 @@ class CertificateManager
     }
 
     /**
-     * Deactivate all certificates of a type.
+     * Deactivate all the device's certificates of a type.
+     *
+     * @throws CertificateException when no device is chosen
      */
     public function deactivateAll(string $type): void
     {
         $storage = $this->config['storage'] ?? 'database';
 
         if ($storage === 'database') {
-            ZatcaCertificate::where('type', $type)->update(['is_active' => false]);
+            ZatcaCertificate::where('device_id', $this->device())->where('type', $type)->update(['is_active' => false]);
         }
-    }
-
-    /**
-     * Delete a certificate.
-     */
-    public function delete(int $id): bool
-    {
-        return ZatcaCertificate::destroy($id) > 0;
-    }
-
-    /**
-     * Get all certificates.
-     */
-    public function all(): array
-    {
-        return ZatcaCertificate::all()
-            ->map(fn ($model) => $this->modelToCertificate($model))
-            ->toArray();
     }
 
     /**
@@ -113,6 +123,8 @@ class CertificateManager
 
     /**
      * Get certificates that are expiring soon.
+     *
+     * @return array<int, CertificateInterface>
      */
     public function getExpiringSoon(int $days = 30): array
     {
@@ -121,7 +133,7 @@ class CertificateManager
             ->where('expires_at', '<=', now()->addDays($days))
             ->get()
             ->map(fn ($model) => $this->modelToCertificate($model))
-            ->toArray();
+            ->all();
     }
 
     /**
@@ -136,6 +148,7 @@ class CertificateManager
         $data = $certificate->toArray();
         $data['private_key'] = Crypt::encryptString($data['private_key']);
         $data['secret'] = Crypt::encryptString($data['secret']);
+        $data['device_id'] = $this->device();
 
         $model = ZatcaCertificate::create($data);
 
@@ -147,7 +160,8 @@ class CertificateManager
      */
     protected function getFromDatabase(string $type): ?CertificateInterface
     {
-        $model = ZatcaCertificate::where('type', $type)
+        $model = ZatcaCertificate::where('device_id', $this->device())
+            ->where('type', $type)
             ->where('is_active', true)
             ->latest()
             ->first();
@@ -164,7 +178,7 @@ class CertificateManager
      */
     protected function storeToFile(CertificateInterface $certificate): CertificateInterface
     {
-        $path = $this->config['path'] ?? storage_path('zatca/certificates');
+        $path = $this->deviceFolder();
         $type = $certificate->getType();
 
         if (! File::isDirectory($path)) {
@@ -178,7 +192,7 @@ class CertificateManager
 
         File::put(
             "{$path}/{$type}.json",
-            json_encode($data, JSON_PRETTY_PRINT)
+            json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)
         );
 
         return $certificate;
@@ -189,8 +203,7 @@ class CertificateManager
      */
     protected function getFromFile(string $type): ?CertificateInterface
     {
-        $path = $this->config['path'] ?? storage_path('zatca/certificates');
-        $file = "{$path}/{$type}.json";
+        $file = "{$this->deviceFolder()}/{$type}.json";
 
         if (! File::exists($file)) {
             return null;
@@ -207,6 +220,24 @@ class CertificateManager
         $data['secret'] = Crypt::decryptString($data['secret']);
 
         return Certificate::fromArray($data);
+    }
+
+    /**
+     * The folder of the device's certificate files, one file per type.
+     *
+     * @throws CertificateException when no device is chosen
+     */
+    protected function deviceFolder(): string
+    {
+        return ($this->config['path'] ?? storage_path('zatca/certificates')).'/'.$this->device();
+    }
+
+    /**
+     * @throws CertificateException when no device is chosen
+     */
+    protected function device(): string
+    {
+        return $this->deviceId ?? throw CertificateException::noDevice();
     }
 
     /**
@@ -232,86 +263,60 @@ class CertificateManager
      */
     public function validateKeyPair(string $certificate, string $privateKey): bool
     {
-        try {
-            $cert = new Certificate(
-                type: 'validation',
-                certificate: $certificate,
-                privateKey: $privateKey,
-                secret: ''
-            );
+        $certificatePublicKey = $this->certificatePublicKey($certificate);
 
-            // Try to get public key from cert and compare with derived public key
-            $certPublicKey = $cert->getPublicKey();
-
-            return ! empty($certPublicKey);
-        } catch (\Exception $e) {
+        if ($certificatePublicKey === null) {
             return false;
         }
+
+        // The pair matches when the certificate carries the public half of this very private key
+        try {
+            $keyPublicKey = EC::loadPrivateKey($privateKey)->getPublicKey()->toString('PKCS8');
+        } catch (NoKeyLoadedException $e) {
+            return false;
+        }
+
+        return hash_equals($certificatePublicKey, $keyPublicKey);
+    }
+
+    /**
+     * The public key a certificate carries, in PKCS8, or null when the text is not a certificate.
+     */
+    protected function certificatePublicKey(string $certificate): ?string
+    {
+        $x509 = new X509;
+
+        if ($x509->loadX509($certificate) === false) {
+            return null;
+        }
+
+        $publicKey = $x509->getPublicKey();
+
+        return $publicKey === false ? null : $publicKey->toString('PKCS8');
     }
 
     /**
      * Import a certificate from PEM files.
      */
-    public function import(
-        string $type,
-        string $certificatePath,
-        string $privateKeyPath,
-        string $secret,
-        ?string $requestId = null
-    ): CertificateInterface {
-        if (! File::exists($certificatePath)) {
-            throw CertificateException::invalid("Certificate file not found: {$certificatePath}");
+    public function import(CertificateOrigin $origin, CertificateFiles $files, string $secret): CertificateInterface
+    {
+        if (! File::exists($files->certificatePath)) {
+            throw CertificateException::invalid("Certificate file not found: {$files->certificatePath}");
         }
 
-        if (! File::exists($privateKeyPath)) {
-            throw CertificateException::invalid("Private key file not found: {$privateKeyPath}");
+        if (! File::exists($files->privateKeyPath)) {
+            throw CertificateException::invalid("Private key file not found: {$files->privateKeyPath}");
         }
 
-        $certificate = File::get($certificatePath);
-        $privateKey = File::get($privateKeyPath);
+        $certificate = File::get($files->certificatePath);
+        $privateKey = File::get($files->privateKeyPath);
 
         if (! $this->validateKeyPair($certificate, $privateKey)) {
             throw CertificateException::keyMismatch();
         }
 
-        $cert = new Certificate(
-            type: $type,
-            certificate: $certificate,
-            privateKey: $privateKey,
-            secret: $secret,
-            requestId: $requestId
-        );
+        $cert = new Certificate($origin, new CertificateCredentials($certificate, $privateKey, $secret));
 
         return $this->store($cert);
-    }
-
-    /**
-     * Export a certificate to files.
-     */
-    public function export(string $type, string $directory): array
-    {
-        $certificate = $this->getActive($type);
-
-        if (! $certificate) {
-            throw CertificateException::notFound($type);
-        }
-
-        if (! File::isDirectory($directory)) {
-            File::makeDirectory($directory, 0755, true);
-        }
-
-        $certPath = "{$directory}/{$type}_certificate.pem";
-        $keyPath = "{$directory}/{$type}_private_key.pem";
-
-        File::put($certPath, $certificate->getCertificatePem());
-        File::put($keyPath, $certificate->getPrivateKey());
-
-        // Set restrictive permissions on private key
-        chmod($keyPath, 0600);
-
-        return [
-            'certificate' => $certPath,
-            'private_key' => $keyPath,
-        ];
     }
 }

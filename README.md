@@ -2,31 +2,30 @@
 
 A comprehensive Laravel package for integrating with Saudi Arabia's ZATCA (Zakat, Tax and Customs Authority) e-invoicing system (FATOORA platform).
 
-## Features
+This package supports Phase 2 requirements including:
 
 - CSR generation and certificate management
 - Invoice XML generation (UBL 2.1 compliant)
 - Digital signing with ECDSA (secp256k1)
-- QR code generation (TLV format with 9 tags)
-- QR code image generation (PNG/SVG) for invoices
+- QR code generation (9 TLV tags)
 - Invoice reporting (B2C simplified invoices)
 - Invoice clearance (B2B standard invoices)
 - Credit and debit note handling
-- Hash chain management (ICV & PIH)
 - Sandbox, simulation, and production environments
 
 ## Requirements
 
-- PHP 8.1+
-- Laravel 10.x, 11.x, or 12.x
+- PHP 8.3+, which Laravel 13 needs
+- Laravel 13.x
 - OpenSSL extension
 - GMP extension (recommended for better performance)
-- `simplesoftwareio/simple-qrcode` (optional, for QR code image generation)
 
 ## Installation
 
+The package is on Packagist:
+
 ```bash
-composer require corecave/laravel-zatca
+composer require corecave/laravel-zatca:^2.0
 ```
 
 Publish the configuration file:
@@ -35,18 +34,10 @@ Publish the configuration file:
 php artisan vendor:publish --tag=zatca-config
 ```
 
-Run the migrations:
+The package ships no migrations. Each workshop keeps its own certificates, invoice counter and hash chain in its own schema, so the host app keeps the two table migrations with its workshop migrations (`database/migrations/tenant` in Syanat) and runs them per workshop:
 
 ```bash
-php artisan migrate
-```
-
-### Optional: QR Code Image Generation
-
-To generate QR code images (PNG/SVG) for embedding in emails or PDFs:
-
-```bash
-composer require simplesoftwareio/simple-qrcode
+php artisan tenants:migrate
 ```
 
 ## Configuration
@@ -57,78 +48,47 @@ Add these environment variables to your `.env` file:
 # Environment: sandbox, simulation, or production
 ZATCA_ENVIRONMENT=simulation
 
-# ===========================================
 # Seller Information
-# ===========================================
 ZATCA_SELLER_NAME="Your Company Name"
-ZATCA_SELLER_NAME_AR="اسم شركتك بالعربي"
+ZATCA_SELLER_NAME_AR="اسم شركتك"
+ZATCA_VAT_NUMBER=300000000000003
+ZATCA_REGISTRATION_NUMBER=1234567890
 
-# VAT Number: 15 digits, format: 3XXXXXXXXXX0003
-# - Must start with 3
-# - Followed by 10-digit registration number
-# - Followed by 0003
-ZATCA_VAT_NUMBER=310000000000003
-
-# Commercial Registration Number (CRN): 10 digits
-ZATCA_REGISTRATION_NUMBER=1000000000
-
-# ===========================================
-# Seller Address (Required for SA)
-# ===========================================
+# Seller Address
 ZATCA_SELLER_STREET="Main Street"
-ZATCA_SELLER_BUILDING="1234"           # 4 digits
+ZATCA_SELLER_BUILDING="1234"
 ZATCA_SELLER_CITY="Riyadh"
 ZATCA_SELLER_DISTRICT="Al Olaya"
-ZATCA_SELLER_POSTAL_CODE="12345"       # 5 digits
-ZATCA_SELLER_ADDITIONAL_NUMBER="1234"  # 4 digits (optional)
+ZATCA_SELLER_POSTAL_CODE="12345"
 
-# ===========================================
 # CSR Configuration
-# ===========================================
 ZATCA_CSR_ORGANIZATION="Your Company Name"
 ZATCA_CSR_ORGANIZATION_UNIT="Main Branch"
-# Common name format depends on environment:
-# - Simulation: TST-886431145-{VAT_NUMBER}
-# - Production: {VAT_NUMBER}
-ZATCA_CSR_COMMON_NAME="TST-886431145-310000000000003"
-
-# Invoice types: 1100 = B2B + B2C, 1000 = B2C only, 0100 = B2B only
+ZATCA_CSR_COMMON_NAME="Your Company Name"
 ZATCA_INVOICE_TYPES=1100
 
-# Business category
-ZATCA_BUSINESS_CATEGORY="Retail"
-ZATCA_CITY="Riyadh"
-
-# ===========================================
-# Debug (optional, for development)
-# ===========================================
+# Debug (optional)
 ZATCA_DEBUG_ENABLED=true
 ZATCA_DEBUG_PATH=zatca/debug
 ```
 
-## Understanding ZATCA Environments
+## Environments
 
-| Environment | Portal | API Endpoint | Purpose |
-|-------------|--------|--------------|---------|
-| `sandbox` | Developer Portal | `/developer-portal` | Basic development testing with mock certificates |
-| `simulation` | Simulation Portal | `/simulation` | Real testing with ZATCA - invoices are validated but not recorded |
-| `production` | FATOORA Portal | `/core` | Live production - invoices are legally binding |
+The package supports three environments:
 
-**Important Notes:**
-- **Sandbox** uses mock certificates that won't pass ZATCA validators - only for initial development
-- **Simulation** uses real ZATCA certificates but invoices aren't recorded - use for integration testing
-- **Production** is live - every invoice submitted is legally binding
+| Environment  | Endpoint         | Certificate Issuer                                     | Purpose                   |
+| ------------ | ---------------- | ------------------------------------------------------ | ------------------------- |
+| `sandbox`    | developer-portal | `CN=eInvoicing` (mock)                                 | Basic development testing |
+| `simulation` | simulation       | `CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local` | Real testing with ZATCA   |
+| `production` | core             | `CN=PEZEINVOICESCA2-CA, DC=extgazt, DC=gov, DC=local`  | Live production           |
 
-## Complete Onboarding Process
+**Important:**
 
-### Overview
+- The `sandbox` environment returns mock certificates that will NOT pass ZATCA's official validators
+- Use `simulation` for testing with the ZATCA validator at https://sandbox.zatca.gov.sa/Compliance
+- Use `production` only when ready to go live
 
-The onboarding process involves 4 steps:
-
-1. **Generate CSR** - Create a Certificate Signing Request
-2. **Get Compliance CSID** - Submit CSR with OTP to get a compliance certificate
-3. **Pass Compliance Checks** - Submit sample invoices for validation
-4. **Get Production CSID** - Exchange compliance certificate for production certificate
+## Onboarding Process
 
 ### Step 1: Generate CSR
 
@@ -136,235 +96,147 @@ The onboarding process involves 4 steps:
 php artisan zatca:generate-csr --save
 ```
 
-This generates:
-- A private key (stored securely)
-- A CSR file for submission to ZATCA
+### Step 2: Get Compliance CSID
 
-### Step 2: Get Compliance CSID & Run Compliance Checks
-
-1. Log in to the appropriate ZATCA portal:
-   - **Simulation**: https://fatoora.zatca.gov.sa/ (simulation section)
-   - **Production**: https://fatoora.zatca.gov.sa/ (production section)
-
-2. Navigate to your EGS (e-Invoice Generation Solution) unit
-
-3. Generate a new OTP (One-Time Password)
-
-4. Run the compliance command within 1 hour (OTP expires):
+1. Log in to the [FATOORA portal](https://fatoora.zatca.gov.sa/)
+2. Generate an OTP for your EGS unit
+3. Run the compliance command:
 
 ```bash
-# For simulation environment
 php artisan zatca:compliance --otp=123456
-
-# The command will:
-# 1. Submit your CSR to ZATCA
-# 2. Receive a compliance certificate (CSID)
-# 3. Run compliance checks with sample invoices
-# 4. Display pass/fail status for each check
 ```
 
 ### Step 3: Get Production CSID
 
-After **ALL** compliance checks pass, request your production certificate:
+After passing compliance checks:
 
 ```bash
 php artisan zatca:production-csid
 ```
 
-**Important:**
-- This command does NOT require a new OTP
-- It uses your compliance certificate to authenticate
-- The compliance request ID is used to verify you passed compliance
-- Only works if you completed Step 2 successfully
+## Usage
 
-### Step 4: Start Issuing Invoices
-
-Once you have a production certificate, you can start issuing legally-binding invoices:
+### Creating a Simplified Invoice (B2C)
 
 ```php
-use Corecave\Zatca\Facades\Zatca;
-
-// The package automatically uses your production certificate
-$result = Zatca::process($invoice);
-```
-
-## Full Usage Example
-
-Here's a complete example from building an invoice to submitting it:
-
-```php
-<?php
-
-namespace App\Services;
-
 use Corecave\Zatca\Facades\Zatca;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Enums\VatCategory;
-use Corecave\Zatca\Enums\PaymentMethod;
-use Corecave\Zatca\Models\ZatcaInvoice;
 
-class InvoiceService
-{
-    /**
-     * Create and submit a B2C invoice to ZATCA.
-     */
-    public function createSimplifiedInvoice(array $orderData): ZatcaInvoice
-    {
-        // Step 1: Build the invoice
-        $invoice = InvoiceBuilder::simplified()
-            ->setInvoiceNumber('INV-' . date('Y') . '-' . str_pad($orderData['id'], 6, '0', STR_PAD_LEFT))
-            ->setIssueDate(now())
-            ->setSupplyDate(now())
-            ->setPaymentMethod(PaymentMethod::CASH);
+// Build the invoice
+$invoice = InvoiceBuilder::simplified()
+    ->setInvoiceNumber('INV-2024-001')
+    ->setIssueDate(now())
+    ->addLineItem([
+        'name' => 'Product Name',
+        'quantity' => 2,
+        'unit_price' => 100.00,
+        'vat_category' => VatCategory::STANDARD,
+    ])
+    ->addLineItem([
+        'name' => 'Service',
+        'quantity' => 1,
+        'unit_price' => 250.00,
+        'vat_category' => VatCategory::STANDARD,
+    ])
+    ->build();
 
-        // Step 2: Add line items
-        foreach ($orderData['items'] as $item) {
-            $invoice->addLineItem([
-                'name' => $item['name'],
-                'quantity' => $item['quantity'],
-                'unit_price' => $item['price'],  // Price EXCLUDING VAT
-                'vat_category' => VatCategory::STANDARD,  // 15% VAT
-            ]);
-        }
+// Report to ZATCA
+$result = Zatca::report($invoice);
 
-        // Step 3: Build and submit to ZATCA
-        $builtInvoice = $invoice->build();
-        $result = Zatca::report($builtInvoice);  // B2C uses report()
+if ($result->isSuccess()) {
+    $qrCode = $result->getQrCode();
+    $signedXml = $result->getSignedXml();
 
-        // Step 4: Handle the result
-        if ($result->isSuccess()) {
-            // Get the stored invoice record
-            $zatcaInvoice = ZatcaInvoice::where('uuid', $builtInvoice->getUuid())->first();
-
-            // QR code for printing on receipt
-            $qrCodeTlv = $result->getQrCode();
-
-            // QR code as PNG for embedding in emails/PDFs
-            $qrCodePng = $zatcaInvoice->qr_code_image;
-
-            return $zatcaInvoice;
-        }
-
-        // Handle errors
-        throw new \Exception('ZATCA submission failed: ' . json_encode($result->getErrors()));
-    }
-
-    /**
-     * Create and submit a B2B invoice to ZATCA.
-     */
-    public function createStandardInvoice(array $orderData, array $buyerData): ZatcaInvoice
-    {
-        // Step 1: Build the invoice with buyer information
-        $invoice = InvoiceBuilder::standard()
-            ->setInvoiceNumber('INV-' . date('Y') . '-' . str_pad($orderData['id'], 6, '0', STR_PAD_LEFT))
-            ->setIssueDate(now())
-            ->setSupplyDate(now())
-            ->setPaymentMethod(PaymentMethod::CREDIT)
-            ->setBuyer([
-                'name' => $buyerData['company_name'],
-                'vat_number' => $buyerData['vat_number'],
-                'registration_number' => $buyerData['cr_number'],
-                'registration_scheme' => 'CRN',
-                'address' => [
-                    'street' => $buyerData['street'],
-                    'building' => $buyerData['building'],
-                    'city' => $buyerData['city'],
-                    'district' => $buyerData['district'],
-                    'postal_code' => $buyerData['postal_code'],
-                    'country' => 'SA',
-                ],
-            ]);
-
-        // Step 2: Add line items
-        foreach ($orderData['items'] as $item) {
-            $invoice->addLineItem([
-                'name' => $item['name'],
-                'quantity' => $item['quantity'],
-                'unit_price' => $item['price'],
-                'vat_category' => VatCategory::STANDARD,
-            ]);
-        }
-
-        // Step 3: Build and submit to ZATCA
-        $builtInvoice = $invoice->build();
-        $result = Zatca::clear($builtInvoice);  // B2B uses clear()
-
-        // Step 4: Handle the result
-        if ($result->isSuccess()) {
-            return ZatcaInvoice::where('uuid', $builtInvoice->getUuid())->first();
-        }
-
-        throw new \Exception('ZATCA clearance failed: ' . json_encode($result->getErrors()));
-    }
-
-    /**
-     * Auto-detect invoice type and submit.
-     */
-    public function submitInvoice($invoice): ZatcaInvoice
-    {
-        // process() automatically uses report() for B2C and clear() for B2B
-        $result = Zatca::process($invoice);
-
-        if ($result->wasReported()) {
-            // B2C invoice was reported
-        }
-
-        if ($result->wasCleared()) {
-            // B2B invoice was cleared
-        }
-
-        return ZatcaInvoice::where('uuid', $invoice->getUuid())->first();
-    }
+    // Store or display the QR code
 }
 ```
 
-## VAT Number & Registration Number Formats
+### Creating a Standard Invoice (B2B)
 
-### VAT Number (15 digits)
+For standard B2B invoices, buyer information is **required** and must include complete address details for Saudi Arabian buyers.
 
-Format: `3XXXXXXXXXX0003`
+```php
+use Corecave\Zatca\Facades\Zatca;
+use Corecave\Zatca\Invoice\InvoiceBuilder;
 
-| Position | Value | Description |
-|----------|-------|-------------|
-| 1 | `3` | Always 3 (country code for Saudi Arabia) |
-| 2-11 | `XXXXXXXXXX` | Your 10-digit Commercial Registration Number |
-| 12-15 | `0003` | Fixed suffix |
+$invoice = InvoiceBuilder::standard()
+    ->setInvoiceNumber('INV-2024-002')
+    ->setIssueDate(now())
+    ->setBuyer([
+        'name' => 'Buyer Company LLC',
+        'vat_number' => '300000000000003',        // Used for TIN scheme if no registration_number
+        'registration_number' => '1234567890',   // CRN - Commercial Registration Number
+        'registration_scheme' => 'CRN',          // Optional: CRN, MOM, MLS, SAG, 700, OTH
+        'address' => [
+            'street' => 'King Fahd Road',
+            'building' => '1234',                // Required for SA buyers (KSA-18)
+            'additional_number' => '5678',       // Optional (KSA-23)
+            'city' => 'Riyadh',
+            'district' => 'Al Olaya',            // Required for SA buyers (KSA-4)
+            'postal_code' => '12345',
+            'country' => 'SA',
+        ],
+    ])
+    ->addLineItem([
+        'name' => 'Consulting Services',
+        'quantity' => 10,
+        'unit_price' => 1000.00,
+        'vat_category' => VatCategory::STANDARD,
+    ])
+    ->build();
 
-**Example:** If your CR is `1234567890`, your VAT number is `312345678900003`
+// Clear with ZATCA (must be done BEFORE issuing to customer)
+$result = Zatca::clear($invoice);
 
-### Commercial Registration Number (10 digits)
+if ($result->isSuccess()) {
+    // ZATCA adds cryptographic stamp and QR code
+    $clearedXml = $result->getClearedXml();
+    $qrCode = $result->getQrCode();
+}
+```
 
-This is your company's official registration number from the Ministry of Commerce.
+### Buyer Identification Schemes
 
-**Example:** `1234567890`
+For the `registration_scheme` field, ZATCA accepts:
 
-## Buyer Identification Schemes
+| Scheme ID | Description                     |
+| --------- | ------------------------------- |
+| `CRN`     | Commercial Registration Number  |
+| `MOM`     | Momra License                   |
+| `MLS`     | MLSD License                    |
+| `SAG`     | Sagia License                   |
+| `NAT`     | National ID (10 digits)         |
+| `GCC`     | GCC ID                          |
+| `IQA`     | Iqama Number                    |
+| `TIN`     | Tax Identification Number (VAT) |
+| `700`     | 700 Number                      |
+| `OTH`     | Other ID                        |
 
-When specifying buyer information for B2B invoices, use the appropriate scheme:
+### Required Buyer Address Fields for Saudi Arabia (BR-KSA-63)
 
-| Scheme ID | Description | Format |
-|-----------|-------------|--------|
-| `CRN` | Commercial Registration Number | 10 digits |
-| `MOM` | Momra License | Variable |
-| `MLS` | MLSD License | Variable |
-| `SAG` | Sagia License | Variable |
-| `NAT` | National ID | 10 digits |
-| `GCC` | GCC ID | Variable |
-| `IQA` | Iqama Number | 10 digits |
-| `TIN` | Tax Identification Number (VAT) | 15 digits |
-| `700` | 700 Number | Variable |
-| `OTH` | Other ID | Variable |
+When the buyer's country is `SA`, these fields are **mandatory**:
 
-## Creating Credit Notes (Refunds)
+| Field         | XML Element               | Description                         |
+| ------------- | ------------------------- | ----------------------------------- |
+| `street`      | `cbc:StreetName`          | Street name (BT-50)                 |
+| `building`    | `cbc:BuildingNumber`      | Building number - 4 digits (KSA-18) |
+| `postal_code` | `cbc:PostalZone`          | Postal code - 5 digits (BT-53)      |
+| `city`        | `cbc:CityName`            | City name (BT-52)                   |
+| `district`    | `cbc:CitySubdivisionName` | District name (KSA-4)               |
+| `country`     | `cbc:IdentificationCode`  | Country code (BT-55)                |
+
+### Creating Credit/Debit Notes
 
 ```php
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 
-// Credit note for a B2C refund
-$creditNote = InvoiceBuilder::creditNote(simplified: true)
+// Credit note for a standard invoice
+$creditNote = InvoiceBuilder::creditNote(simplified: false)
     ->setInvoiceNumber('CN-2024-001')
-    ->setOriginalInvoice('INV-2024-001')  // Reference the original invoice
-    ->setReason('Customer returned goods')
+    ->setOriginalInvoice('INV-2024-002') // Reference original invoice
+    ->setReason('Returned goods')
+    ->setBuyer([/* buyer details */])
     ->addLineItem([
         'name' => 'Returned Product',
         'quantity' => 1,
@@ -373,107 +245,163 @@ $creditNote = InvoiceBuilder::creditNote(simplified: true)
     ])
     ->build();
 
+// Process (automatically clears for standard, reports for simplified)
 $result = Zatca::process($creditNote);
 ```
 
-## QR Code Image Generation
+### Auto-Processing Invoices
 
-Generate QR code images for receipts, emails, or PDFs:
+The `process()` method automatically determines whether to report or clear:
 
 ```php
-use Corecave\Zatca\Models\ZatcaInvoice;
+// Automatically uses report() for simplified invoices
+// and clear() for standard invoices
+$result = Zatca::process($invoice);
 
-$invoice = ZatcaInvoice::find($id);
+if ($result->wasReported()) {
+    // B2C invoice was reported
+}
 
-// Get QR code as base64-encoded PNG (for emails/PDFs)
-$pngBase64 = $invoice->qr_code_image;
-echo '<img src="data:image/png;base64,' . $pngBase64 . '" alt="QR Code">';
-
-// Get QR code as SVG (for web display)
-$svg = $invoice->qr_code_svg;
-echo $svg;
-
-// Get raw TLV data (for custom QR generation)
-$tlvData = $invoice->qr_code;
+if ($result->wasCleared()) {
+    // B2B invoice was cleared
+}
 ```
 
-**Note:** Requires `simplesoftwareio/simple-qrcode` package.
+### VAT Categories
+
+```php
+use Corecave\Zatca\Enums\VatCategory;
+use Corecave\Zatca\Enums\VatExemptionReason;
+
+// Standard rate (15%)
+->addLineItem([
+    'name' => 'Product',
+    'quantity' => 1,
+    'unit_price' => 100.00,
+    'vat_category' => VatCategory::STANDARD,
+])
+
+// Zero-rated
+->addLineItem([
+    'name' => 'Export Product',
+    'quantity' => 1,
+    'unit_price' => 100.00,
+    'vat_category' => VatCategory::ZERO_RATED,
+    'vat_exemption_reason' => VatExemptionReason::EXPORT,
+])
+
+// Exempt
+->addLineItem([
+    'name' => 'Financial Service',
+    'quantity' => 1,
+    'unit_price' => 100.00,
+    'vat_category' => VatCategory::EXEMPT,
+    'vat_exemption_reason' => VatExemptionReason::FINANCIAL_SERVICES,
+])
+```
+
+### Working with Certificates
+
+```php
+use Corecave\Zatca\Facades\Zatca;
+
+// Check if production certificate exists
+if (Zatca::certificate()->hasActiveProductionCertificate()) {
+    // Ready to issue invoices
+}
+
+// Get certificate details
+$cert = Zatca::certificate()->getActive('production');
+$expiresAt = $cert->getExpiresAt();
+$isExpiringSoon = $cert->isExpiringSoon(30);
+
+// Get certificates expiring soon
+$expiring = Zatca::certificate()->getExpiringSoon(30);
+
+// Get certificate issuer (for debugging)
+$issuer = $cert->getFormattedIssuer();
+// Should be: CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local (simulation)
+// NOT: CN=eInvoicing (mock/sandbox)
+```
+
+### Manual XML Generation
+
+```php
+use Corecave\Zatca\Facades\Zatca;
+
+// Generate XML without submitting
+$xml = Zatca::generateXml($invoice);
+
+// Validate XML
+$isValid = Zatca::validateXml($xml);
+
+// Sign XML
+$signedXml = Zatca::signXml($xml);
+```
+
+### Hash Chain Management
+
+```php
+use Corecave\Zatca\Hash\HashChainManager;
+
+$hashManager = app(HashChainManager::class);
+
+// Get next ICV
+$icv = $hashManager->getNextIcv();
+
+// Get previous invoice hash
+$pih = $hashManager->getPreviousInvoiceHash();
+
+// Verify chain integrity
+$result = $hashManager->verifyChain();
+if (!$result['valid']) {
+    // Chain has issues
+}
+
+// Get statistics
+$stats = $hashManager->getStatistics();
+```
 
 ## Artisan Commands
 
-### Generate CSR
 ```bash
+# Generate CSR for onboarding
 php artisan zatca:generate-csr --save
-```
 
-### Run Compliance Process
-```bash
-# Get OTP from ZATCA portal first, then:
+# Run compliance process
 php artisan zatca:compliance --otp=123456
-```
 
-### Get Production CSID
-```bash
-# After compliance passes (no OTP needed):
+# Request production CSID
 php artisan zatca:production-csid
 
-# Or specify request ID manually:
-php artisan zatca:production-csid --request-id=1234567890
-```
-
-### Renew Production Certificate
-```bash
-# Get new OTP from ZATCA portal, then:
+# Renew expiring certificate
 php artisan zatca:renew-csid --otp=123456
-
-# Force renewal even if not expiring:
-php artisan zatca:renew-csid --otp=123456 --force
 ```
 
-### Cleanup Utility
-```bash
-# Show help
-php artisan zatca:cleanup
+## Events
 
-# Clean up compliance certificates
-php artisan zatca:cleanup --compliance
+The package dispatches events you can listen to:
 
-# Clean up production certificates
-php artisan zatca:cleanup --production
-
-# Clean up all certificates
-php artisan zatca:cleanup --certificates
-
-# Clean up CSR and private key files
-php artisan zatca:cleanup --csr
-
-# Clean up all invoices from database
-php artisan zatca:cleanup --invoices
-
-# Clean up debug files
-php artisan zatca:cleanup --debug
-
-# Clean up everything
-php artisan zatca:cleanup --all
-
-# Skip confirmation prompts
-php artisan zatca:cleanup --all --force
-```
+- `InvoiceReported` - When a simplified invoice is successfully reported
+- `InvoiceCleared` - When a standard invoice is successfully cleared
+- `InvoiceRejected` - When an invoice is rejected by ZATCA
+- `CertificateExpiring` - When a certificate is about to expire
 
 ## Debugging
 
-Enable debug mode to save XML files for inspection:
+Enable debug mode to save XML files and hashes for inspection:
 
 ```env
 ZATCA_DEBUG_ENABLED=true
 ZATCA_DEBUG_PATH=zatca/debug
 ```
 
-Debug files are saved to `storage/app/zatca/debug/`:
+Debug files are saved to `storage/app/{ZATCA_DEBUG_PATH}/`:
+
 - `{invoice}_unsigned.xml` - XML before signing
 - `{invoice}_signed.xml` - XML after signing
 - `{invoice}_hash.txt` - Invoice hash
-- `{invoice}_qr.txt` - QR code TLV data
+- `{invoice}_qr.txt` - QR code data
 
 ## Error Handling
 
@@ -484,74 +412,74 @@ use Corecave\Zatca\Exceptions\CertificateException;
 
 try {
     $result = Zatca::report($invoice);
-
-    if (!$result->isSuccess()) {
-        // ZATCA accepted but with warnings
-        $warnings = $result->getWarnings();
-    }
 } catch (ValidationException $e) {
-    // Invoice validation failed locally
+    // Invoice validation failed
     $errors = $e->getErrors();
 } catch (ApiException $e) {
-    // ZATCA API returned an error
+    // ZATCA API error
     $zatcaErrors = $e->getZatcaErrors();
     $zatcaWarnings = $e->getZatcaWarnings();
 } catch (CertificateException $e) {
-    // Certificate issue (missing, expired, invalid)
-    $message = $e->getMessage();
+    // Certificate issue: renew the CSID with `php artisan zatca:renew-csid`, then retry
+    $certificateError = $e->getMessage();
 }
 ```
 
 ## Common ZATCA Validation Errors
 
-| Error Code | Message | Solution |
-|------------|---------|----------|
-| `BR-KSA-F-13` | Invalid Seller/Buyer ID | Check VAT number format (15 digits: 3XXXXXXXXXX0003) |
-| `BR-KSA-63` | Missing buyer address fields | Include all required fields for SA buyers |
-| `BR-KSA-18` | Invalid building number | Building number must be exactly 4 digits |
-| `BR-KSA-64` | Invalid additional number | Additional number must be exactly 4 digits |
-| `X509IssuerName` | Wrong certificate issuer | Use simulation/production environment, not sandbox |
-| `Invalid-CSR` | CSR is invalid | Regenerate CSR with correct configuration |
-
-## Events
-
-The package dispatches events you can listen to:
-
-```php
-// In EventServiceProvider
-protected $listen = [
-    \Corecave\Zatca\Events\InvoiceReported::class => [
-        \App\Listeners\HandleInvoiceReported::class,
-    ],
-    \Corecave\Zatca\Events\InvoiceCleared::class => [
-        \App\Listeners\HandleInvoiceCleared::class,
-    ],
-    \Corecave\Zatca\Events\InvoiceRejected::class => [
-        \App\Listeners\HandleInvoiceRejected::class,
-    ],
-];
-```
+| Error Code         | Message                    | Solution                                                                   |
+| ------------------ | -------------------------- | -------------------------------------------------------------------------- |
+| `X509IssuerName`   | wrong X509IssuerName       | Use `simulation` or `production` environment to get real certificates      |
+| `X509SerialNumber` | wrong X509SerialNumber     | Certificate not from ZATCA - regenerate with real OTP                      |
+| `BR-KSA-F-13`      | Invalid Seller/Buyer ID    | Provide valid `registration_number` with correct `registration_scheme`     |
+| `BR-KSA-63`        | Missing address fields     | Include all required fields: street, building, postal_code, city, district |
+| `BR-CL-KSA-14`     | QR Code exceeds 1000 chars | Reduce invoice data or check QR generation                                 |
 
 ## Changelog
 
-### v1.2.0 (2024-12-16)
+### v2.0.0 (2026-10-17)
+
+#### Changed
+
+Every method now takes at most three parameters, so the long parameter lists moved into named value objects. The XML, hashes, QR codes and signatures the package produces are unchanged. Callers change as follows:
+
+- `Zatca::generateQrCode($invoice, $signatureValue, $publicKey, $certificateSignature)` is now `Zatca::generateQrCode($invoice, new QrSignature($signatureValue, $publicKey, $certificateSignature))`, and `QrGenerator::generate()` takes the same two arguments.
+- `new Invoice(...)` takes one `InvoiceData` and `new LineItem(...)` one `LineItemData`: set their public properties by name. `InvoiceBuilder` and `LineItem::fromArray()` work as before.
+- `new Certificate($type, $certificate, $privateKey, $secret, $requestId, $issuedAt, $expiresAt, $active, $metadata)` is now `new Certificate(new CertificateOrigin($type, $requestId, $metadata), new CertificateCredentials($certificate, $privateKey, $secret), new CertificateLifetime($issuedAt, $expiresAt, $active))`. `Certificate::fromApiResponse()` and `Certificate::fromArray()` work as before.
+- `CertificateManager::import($type, $certificatePath, $privateKeyPath, $secret, $requestId)` is now `import(new CertificateOrigin($type, $requestId), new CertificateFiles($certificatePath, $privateKeyPath), $secret)`.
+- `CsrGenerator::generateWithSerial($companyName, $version, $uuid, $config)` is now `generateWithSerial(new EgsSerialNumber($companyName, $version, $uuid), $config)`.
+- `HashChainManager::recordInvoice(...)` takes one `InvoiceRecord`: set its public properties by name. `updateInvoiceStatus($uuid, $status, $zatcaResponse, $signedXml, $qrCode)` is now `updateInvoiceStatus($uuid, $status, new StatusUpdate($zatcaResponse, $signedXml, $qrCode))`.
+- `DebugDumper::dumpAll($invoiceId, $unsignedXml, $signedXml, $qrCode, $hash)` is now `dumpAll($invoiceId, new InvoiceDocuments($unsignedXml, $signedXml, $qrCode), $hash)`.
+- `new ReportResult($invoice, $signedXml, $qrCode, $response)` is now `new ReportResult(new Submission($invoice, $response), $signedXml, $qrCode)`, and `ClearanceResult` likewise.
+- `ZatcaException` has no constructor of its own: build one with context through `ZatcaException::withContext($message, $context)`. `ApiException`'s constructor no longer takes the ZATCA errors and warnings; `ApiException::fromResponse()` reads them from the response.
+- `UblGenerator` writes the parties, totals and lines through `UblPartyWriter`, `UblTotalsWriter` and `UblLineWriter`; its public methods are unchanged.
 
 #### Added
-- QR code image generation (`qr_code_image` and `qr_code_svg` attributes)
-- Optional dependency on `simplesoftwareio/simple-qrcode`
+
+- `InvoiceBuilder::fromConfig()` builds an `InvoiceBuilder` from the `zatca.seller` and `zatca.invoice` config, which the service provider and the builder's own static constructors used to read separately.
 
 ### v1.1.0 (2024-12-13)
 
 #### Fixed
-- X509IssuerName format matching ZATCA SDK
-- SignedProperties hash computation
-- Buyer PartyIdentification with proper schemeID
-- SA buyer address fields (BuildingNumber, District, etc.)
+
+- **X509IssuerName format**: Now correctly uses RFC 4514 format with `, ` (comma + space) separators matching ZATCA SDK
+- **X509SerialNumber**: Properly extracted from certificate
+- **SignedProperties hash**: XML whitespace now matches Python SDK's exact format for correct hash computation
+- **Buyer PartyIdentification**: Now always includes `<cac:PartyIdentification>` element with proper schemeID
+- **Buyer postal address**: Now includes all required SA address fields (BuildingNumber, District, etc.)
+
+#### Changed
+
+- `Certificate::getFormattedIssuer()` no longer reverses DN order
+- `XmlSigner::formatIssuerDN()` preserves `, ` separators
+- `XmlSigner::computeSignedPropertiesHashSdkStyle()` uses exact SDK whitespace
+- `XmlSigner::buildSignatureXml()` matches SDK indentation structure
+- `UblGenerator::addCustomerParty()` always adds buyer ID, uses VAT as TIN fallback
 
 #### Added
-- Compliance check command with sample invoice generation
-- Certificate cleanup command
-- Automatic schemeID detection
+
+- Support for flat buyer data with all SA-required address fields
+- Automatic schemeID detection (TIN for VAT numbers, NAT for national IDs, CRN for registration numbers)
 
 ### v1.0.0 (2024-12-12)
 
@@ -564,7 +492,8 @@ MIT License. See [LICENSE](LICENSE) for more information.
 ## Resources
 
 - [ZATCA E-Invoicing Portal](https://zatca.gov.sa/en/E-Invoicing/Pages/default.aspx)
-- [FATOORA Portal](https://fatoora.zatca.gov.sa/)
+- [ZATCA Simulation Portal](https://fatoora.zatca.gov.sa/)
 - [ZATCA XML Validator](https://sandbox.zatca.gov.sa/Compliance)
 - [Developer Portal Manual](https://zatca.gov.sa/en/E-Invoicing/Introduction/Guidelines/Documents/DEVELOPER-PORTAL-MANUAL.pdf)
 - [XML Implementation Standard](https://zatca.gov.sa/ar/E-Invoicing/SystemsDevelopers/Documents/20230519_ZATCA_Electronic_Invoice_XML_Implementation_Standard_%20vF.pdf)
+- [ZATCA SDK](https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx)

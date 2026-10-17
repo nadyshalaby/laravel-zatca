@@ -5,8 +5,6 @@ namespace Corecave\Zatca;
 use Corecave\Zatca\Certificate\CertificateManager;
 use Corecave\Zatca\Certificate\CsrGenerator;
 use Corecave\Zatca\Client\ZatcaClient;
-use Corecave\Zatca\Commands\CleanupCommand;
-use Corecave\Zatca\Commands\ComplianceCheckCommand;
 use Corecave\Zatca\Commands\ComplianceCommand;
 use Corecave\Zatca\Commands\GenerateCsrCommand;
 use Corecave\Zatca\Commands\ProductionCsidCommand;
@@ -33,17 +31,29 @@ class ZatcaServiceProvider extends ServiceProvider
             'zatca'
         );
 
+        $this->registerCoreServices();
+        $this->registerDocumentServices();
+    }
+
+    /**
+     * Register the ZATCA manager, the API client, and the CSR and certificate services.
+     */
+    protected function registerCoreServices(): void
+    {
         // Register the main Zatca manager
         $this->app->singleton('zatca', function ($app) {
             return new ZatcaManager($app);
         });
 
-        // Register API client
-        $this->app->singleton(ApiClientInterface::class, function ($app) {
+        // Register API client: one instance on the configured environment, whether it is asked for by its
+        // interface or, as the commands do, by its class
+        $this->app->singleton(ZatcaClient::class, function ($app) {
             return new ZatcaClient(
-                config('zatca.environment', 'sandbox')
+                config('zatca.environment', 'sandbox'),
+                $this->clientSettings()
             );
         });
+        $this->app->singleton(ApiClientInterface::class, fn ($app) => $app->make(ZatcaClient::class));
 
         // Register CSR generator
         $this->app->singleton(CsrGenerator::class, function ($app) {
@@ -56,7 +66,13 @@ class ZatcaServiceProvider extends ServiceProvider
                 config('zatca.certificates', [])
             );
         });
+    }
 
+    /**
+     * Register the services that build, sign, validate, stamp and chain invoice documents.
+     */
+    protected function registerDocumentServices(): void
+    {
         // Register UBL generator
         $this->app->singleton(UblGenerator::class, function ($app) {
             return new UblGenerator;
@@ -84,10 +100,7 @@ class ZatcaServiceProvider extends ServiceProvider
 
         // Register invoice builder
         $this->app->bind(InvoiceBuilder::class, function ($app) {
-            return new InvoiceBuilder(
-                config('zatca.seller', []),
-                config('zatca.invoice', [])
-            );
+            return InvoiceBuilder::fromConfig();
         });
 
         // Register debug dumper
@@ -105,26 +118,40 @@ class ZatcaServiceProvider extends ServiceProvider
             __DIR__.'/../config/zatca.php' => config_path('zatca.php'),
         ], 'zatca-config');
 
-        $this->publishes([
-            __DIR__.'/../database/migrations' => database_path('migrations'),
-        ], 'zatca-migrations');
-
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-
         if ($this->app->runningInConsole()) {
             $this->commands([
                 GenerateCsrCommand::class,
                 ComplianceCommand::class,
-                ComplianceCheckCommand::class,
                 ProductionCsidCommand::class,
                 RenewCsidCommand::class,
-                CleanupCommand::class,
             ]);
         }
     }
 
     /**
+     * The client's HTTP settings and API version from the package config, typed as the client reads them:
+     * values set through the environment arrive as strings.
+     *
+     * @return array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
+     */
+    protected function clientSettings(): array
+    {
+        $http = config('zatca.http', []);
+
+        return [
+            'timeout' => (int) ($http['timeout'] ?? 30),
+            'connect_timeout' => (int) ($http['connect_timeout'] ?? 10),
+            'retries' => (int) ($http['retries'] ?? 3),
+            'retry_delay' => (int) ($http['retry_delay'] ?? 1000),
+            'verify_ssl' => filter_var($http['verify_ssl'] ?? true, FILTER_VALIDATE_BOOL),
+            'api_version' => (string) config('zatca.api_version', 'V2'),
+        ];
+    }
+
+    /**
      * Get the services provided by the provider.
+     *
+     * @return array<int, string>
      */
     public function provides(): array
     {

@@ -3,11 +3,14 @@
 namespace Corecave\Zatca\Commands;
 
 use Corecave\Zatca\Certificate\CsrGenerator;
+use Corecave\Zatca\Certificate\EgsSerialNumber;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
 class GenerateCsrCommand extends Command
 {
+    use ReportsFailures;
+
     /**
      * The name and signature of the console command.
      */
@@ -16,7 +19,7 @@ class GenerateCsrCommand extends Command
                             {--organization-unit= : Organization unit}
                             {--common-name= : Common name}
                             {--vat-number= : VAT registration number (15 digits)}
-                            {--invoice-types=1100 : Invoice types (1000=B2C, 0100=B2B, 1100=Both)}
+                            {--invoice-types= : Invoice types (1000=B2C, 0100=B2B, 1100=Both), the configured ones when left out}
                             {--save : Save CSR and private key to files}
                             {--output= : Output directory for files}';
 
@@ -37,16 +40,7 @@ class GenerateCsrCommand extends Command
         $config = $this->gatherConfig();
 
         // Generate serial number
-        // For sandbox/simulation, use TST format; for production, use organization name
-        $uuid = (string) Str::uuid();
-        $environment = config('zatca.environment', 'sandbox');
-        $serialPrefix = in_array($environment, ['sandbox', 'simulation']) ? 'TST' : $config['organization'];
-        $serialNumber = sprintf(
-            '1-%s|2-%s|3-%s',
-            $serialPrefix,
-            $serialPrefix,  // Also use TST for the version part in test environments
-            $uuid
-        );
+        $serialNumber = (string) new EgsSerialNumber((string) $config['organization'], '1.0', (string) Str::uuid());
         $config['serial_number'] = $serialNumber;
 
         try {
@@ -54,13 +48,7 @@ class GenerateCsrCommand extends Command
 
             $this->info('CSR generated successfully!');
             $this->newLine();
-
-            // Display CSR info
-            $this->components->twoColumnDetail('Serial Number', $serialNumber);
-            $this->components->twoColumnDetail('Organization', $config['organization']);
-            $this->components->twoColumnDetail('VAT Number', $config['vat_number']);
-            $this->components->twoColumnDetail('Invoice Types', $this->getInvoiceTypesLabel($config['invoice_types']));
-            $this->newLine();
+            $this->displayCsrDetails($serialNumber, $config);
 
             if ($this->option('save')) {
                 $this->saveFiles($result);
@@ -68,21 +56,45 @@ class GenerateCsrCommand extends Command
                 $this->displayCsr($result);
             }
 
-            $this->newLine();
-            $this->warn('Next steps:');
-            $this->line('  1. Log in to the FATOORA portal and generate an OTP');
-            $this->line('  2. Run: php artisan zatca:compliance --otp=<YOUR_OTP>');
+            $this->displayNextSteps();
 
             return self::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Failed to generate CSR: '.$e->getMessage());
+            $this->reportFailure('Failed to generate CSR: ', $e);
 
             return self::FAILURE;
         }
     }
 
     /**
+     * Display the serial number and the details the CSR was made for.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    protected function displayCsrDetails(string $serialNumber, array $config): void
+    {
+        $this->components->twoColumnDetail('Serial Number', $serialNumber);
+        $this->components->twoColumnDetail('Organization', $config['organization']);
+        $this->components->twoColumnDetail('VAT Number', $config['vat_number']);
+        $this->components->twoColumnDetail('Invoice Types', $this->getInvoiceTypesLabel($config['invoice_types']));
+        $this->newLine();
+    }
+
+    /**
+     * Display what to do once the CSR exists.
+     */
+    protected function displayNextSteps(): void
+    {
+        $this->newLine();
+        $this->warn('Next steps:');
+        $this->line('  1. Log in to the FATOORA portal and generate an OTP');
+        $this->line('  2. Run: php artisan zatca:compliance --otp=<YOUR_OTP>');
+    }
+
+    /**
      * Gather configuration from options or interactively.
+     *
+     * @return array<string, mixed>
      */
     protected function gatherConfig(): array
     {
@@ -122,13 +134,13 @@ class GenerateCsrCommand extends Command
             'common_name' => $commonName,
             'vat_number' => $vatNumber,
             'invoice_types' => $invoiceTypes,
-            'location' => $config['location'] ?? [],
-            'business_category' => $config['business_category'] ?? 'Technology',
         ];
     }
 
     /**
      * Save CSR and private key to files.
+     *
+     * @param  array{csr: string, private_key: string, public_key: string}  $result
      */
     protected function saveFiles(array $result): void
     {
@@ -152,6 +164,8 @@ class GenerateCsrCommand extends Command
 
     /**
      * Display CSR in terminal.
+     *
+     * @param  array{csr: string, private_key: string, public_key: string}  $result
      */
     protected function displayCsr(array $result): void
     {

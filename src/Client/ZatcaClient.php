@@ -21,8 +21,14 @@ class ZatcaClient implements ApiClientInterface
 
     protected ?CertificateInterface $certificate = null;
 
+    /**
+     * @var array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
+     */
     protected array $config;
 
+    /**
+     * @param  array{timeout?: int, connect_timeout?: int, retries?: int, retry_delay?: int, verify_ssl?: bool, api_version?: string}  $config
+     */
     public function __construct(string $environment = 'sandbox', array $config = [])
     {
         $this->environment = Environment::from($environment);
@@ -68,6 +74,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Request a Compliance CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function requestComplianceCsid(string $csr, string $otp): array
     {
@@ -88,6 +96,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Submit an invoice for compliance check.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function submitComplianceInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -107,6 +117,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Request a Production CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function requestProductionCsid(string $complianceRequestId): array
     {
@@ -124,6 +136,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Renew a Production CSID.
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function renewProductionCsid(string $csr, string $otp): array
     {
@@ -143,6 +157,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Report a simplified invoice (B2C).
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function reportInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -162,6 +178,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Clear a standard invoice (B2B).
+     *
+     * @return array<string, mixed> ZATCA's JSON answer
      */
     public function clearInvoice(string $signedXml, string $invoiceHash, string $uuid): array
     {
@@ -198,7 +216,19 @@ class ZatcaClient implements ApiClientInterface
     }
 
     /**
+     * The settings the client was built with: its timeouts, retries, SSL check and API version.
+     *
+     * @return array{timeout: int, connect_timeout: int, retries: int, retry_delay: int, verify_ssl: bool, api_version: string}
+     */
+    public function getConfig(): array
+    {
+        return $this->config;
+    }
+
+    /**
      * Get authentication headers.
+     *
+     * @return array<string, string>
      */
     protected function getAuthHeaders(): array
     {
@@ -242,6 +272,8 @@ class ZatcaClient implements ApiClientInterface
     /**
      * Handle API response.
      *
+     * @return array<string, mixed>
+     *
      * @throws ApiException
      */
     protected function handleResponse(ResponseInterface $response): array
@@ -274,37 +306,38 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Retry decision function.
+     *
+     * Guzzle hands it the attempt's outcome as two more arguments: the response, or null,
+     * then the exception, or null.
      */
     protected function retryDecider(): callable
     {
-        return function (
-            int $retries,
-            RequestInterface $request,
-            ?ResponseInterface $response = null,
-            ?\Exception $exception = null
-        ): bool {
+        return function (int $retries, RequestInterface $request, ResponseInterface|\Exception|null ...$outcome): bool {
+            [$response, $exception] = $outcome + [null, null];
+
+            $retryable = $this->isRetryable(
+                $response instanceof ResponseInterface ? $response : null,
+                $exception instanceof \Exception ? $exception : null
+            );
+
             // Don't retry more than configured times
-            if ($retries >= $this->config['retries']) {
-                return false;
-            }
-
-            // Retry on connection errors
-            if ($exception instanceof ConnectException) {
-                return true;
-            }
-
-            // Retry on server errors (5xx)
-            if ($response && $response->getStatusCode() >= 500) {
-                return true;
-            }
-
-            // Retry on rate limiting
-            if ($response && $response->getStatusCode() === 429) {
-                return true;
-            }
-
-            return false;
+            return $retries < $this->config['retries'] && $retryable;
         };
+    }
+
+    /**
+     * Whether an attempt failed in a way worth retrying: a connection error, a server error or a rate limit.
+     */
+    protected function isRetryable(?ResponseInterface $response = null, ?\Exception $exception = null): bool
+    {
+        // Retry on connection errors
+        if ($exception instanceof ConnectException) {
+            return true;
+        }
+
+        // Retry on server errors (5xx) and on rate limiting
+        return $response !== null
+            && ($response->getStatusCode() >= 500 || $response->getStatusCode() === 429);
     }
 
     /**
@@ -313,8 +346,11 @@ class ZatcaClient implements ApiClientInterface
     protected function retryDelay(): callable
     {
         return function (int $retries): int {
-            // Exponential backoff
-            return $this->config['retry_delay'] * (2 ** $retries);
+            // Exponential backoff, with up to half of it again at random so clients that failed together
+            // do not all come back in the same millisecond
+            $backoff = $this->config['retry_delay'] * (2 ** $retries);
+
+            return $backoff + random_int(0, intdiv($backoff, 2));
         };
     }
 
@@ -355,6 +391,8 @@ class ZatcaClient implements ApiClientInterface
 
     /**
      * Log API response.
+     *
+     * @param  array<string, mixed>  $body
      */
     protected function logResponse(int $statusCode, array $body): void
     {

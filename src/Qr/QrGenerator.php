@@ -21,39 +21,29 @@ class QrGenerator
     /**
      * Generate QR code content for an invoice.
      *
-     * ZATCA Phase 2 TLV tags (per ZATCA SDK reference):
-     * - Tags 1-5: Text values (seller, VAT, timestamp, amounts) as UTF-8 strings
-     * - Tag 6: Invoice Hash - base64 encoded string (DigestValue from XML signature)
-     * - Tag 7: Digital Signature Value - base64 encoded string (SignatureValue from XML)
-     * - Tag 8: ECDSA Public Key - raw SPKI DER bytes
-     * - Tag 9: Certificate Signature - raw signature bytes from X.509 certificate
-     *
-     * NOTE: Per ZATCA SDK reference implementation, tags 6 and 7 are stored as
-     * base64 STRINGS (encoded to UTF-8 bytes in TLV), while tags 8 and 9 are
-     * raw binary bytes.
+     * ZATCA Phase 2 TLV tags (per ZATCA official spec):
+     * - Tags 1-5: Text values (seller, VAT, timestamp, amounts)
+     * - Tag 6: Invoice Hash (base64 encoded DigestValue from signature)
+     * - Tag 7: Digital Signature Value (base64 encoded SignatureValue)
+     * - Tag 8: ECDSA Public Key (SPKI DER format bytes)
+     * - Tag 9: Certificate Signature (raw signature from X.509 certificate)
      *
      * @param  InvoiceInterface  $invoice  The invoice
-     * @param  string  $signatureValue  Base64 encoded SignatureValue from XML signature
-     * @param  string  $publicKey  Public key - raw SPKI DER bytes
-     * @param  string  $certificateSignature  Raw certificate signature bytes (from X.509 cert)
+     * @param  QrSignature  $signature  The signature value, the public key and the certificate signature
      * @return string Base64 encoded TLV data
      */
-    public function generate(
-        InvoiceInterface $invoice,
-        string $signatureValue,
-        string $publicKey,
-        string $certificateSignature
-    ): string {
+    public function generate(InvoiceInterface $invoice, QrSignature $signature): string
+    {
         $tags = [
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
-            3 => $this->formatTimestamp($invoice->getIssueDate()),
-            4 => $this->formatAmount($invoice->getTotalWithVat()),
-            5 => $this->formatAmount($invoice->getTotalVat()),
-            6 => $this->getInvoiceHash($invoice),                // base64 string (DigestValue)
-            7 => $signatureValue,                                 // base64 string (SignatureValue)
-            8 => $this->formatPublicKey($publicKey),             // SPKI DER bytes
-            9 => $certificateSignature,                          // Raw cert signature bytes
+            3 => $this->issueTimestamp($invoice->getIssueDate()),
+            4 => $invoice->getTotalWithVat(),
+            5 => $invoice->getTotalVat(),
+            6 => $this->getInvoiceHash($invoice),                // base64 DigestValue string
+            7 => $signature->signatureValue,                      // base64 SignatureValue string
+            8 => $this->formatPublicKey($signature->publicKey),  // SPKI DER bytes
+            9 => $signature->certificateSignature,               // Raw cert signature bytes
         ];
 
         return $this->encoder->encode($tags);
@@ -68,8 +58,8 @@ class QrGenerator
             1 => $this->getSellerName($invoice),
             2 => $invoice->getSellerVatNumber(),
             3 => $this->formatTimestamp($invoice->getIssueDate()),
-            4 => $this->formatAmount($invoice->getTotalWithVat()),
-            5 => $this->formatAmount($invoice->getTotalVat()),
+            4 => $invoice->getTotalWithVat(),
+            5 => $invoice->getTotalVat(),
         ];
 
         return $this->encoder->encode($tags);
@@ -86,52 +76,28 @@ class QrGenerator
     }
 
     /**
-     * Format timestamp for ZATCA QR code.
-     *
-     * ZATCA requires the timestamp to match the XML IssueDate + IssueTime.
-     * Format: YYYY-MM-DDTHH:MM:SS (without timezone suffix).
-     *
-     * Note: The "Z" suffix should NOT be added as it indicates UTC timezone,
-     * but ZATCA expects the timestamp to match exactly with the XML values
-     * which are formatted as date (YYYY-MM-DD) and time (HH:MM:SS) separately.
+     * Format timestamp in ISO 8601 format.
      */
     protected function formatTimestamp(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
+     * A phase 2 code's tag 3: the XML's issue date and issue time joined, as written there and with no
+     * zone, since ZATCA warns that the time does not match the issue time (KSA-25) when a Z follows it
+     * (invoiceTimeStamp_QRCODE_INVALID in the sandbox, 2026-10-07).
+     */
+    protected function issueTimestamp(\DateTimeInterface $date): string
     {
         return $date->format('Y-m-d\TH:i:s');
     }
 
     /**
-     * Format amount to 2 decimal places.
-     */
-    protected function formatAmount(float $amount): string
-    {
-        return number_format($amount, 2, '.', '');
-    }
-
-    /**
-     * Get invoice hash for QR code Tag 6 as raw bytes.
-     *
-     * ZATCA Phase 2 requires Tag 6 to contain the raw SHA-256 hash bytes,
-     * NOT the base64-encoded string. The invoice stores the hash as base64,
-     * so we decode it to get the raw 32-byte hash.
-     */
-    protected function getInvoiceHashRaw(InvoiceInterface $invoice): string
-    {
-        $hash = $invoice->getHash();
-
-        if ($hash === null) {
-            return '';
-        }
-
-        // Decode from base64 to get raw SHA-256 bytes (32 bytes)
-        return base64_decode($hash);
-    }
-
-    /**
      * Get invoice hash for QR code Tag 6.
      *
-     * Returns the base64 encoded hash string as stored in the invoice.
-     * Per ZATCA SDK reference, tag 6 contains the base64 string (not raw bytes).
+     * Per trusted package: Tag 6 receives the base64 encoded hash,
+     * NOT raw bytes. The hash is stored as base64 on the invoice.
      */
     protected function getInvoiceHash(InvoiceInterface $invoice): string
     {
@@ -141,6 +107,7 @@ class QrGenerator
             return '';
         }
 
+        // Return base64 encoded hash as-is (NOT decoded to raw bytes!)
         return $hash;
     }
 
@@ -169,6 +136,8 @@ class QrGenerator
 
     /**
      * Decode QR code content.
+     *
+     * @return array<int, string>
      */
     public function decode(string $qrCode): array
     {
@@ -177,6 +146,8 @@ class QrGenerator
 
     /**
      * Get human-readable QR code content.
+     *
+     * @return list<array{tag: int, name: string, length: int, value: string}>
      */
     public function toHumanReadable(string $qrCode): array
     {
@@ -185,15 +156,13 @@ class QrGenerator
 
     /**
      * Validate QR code content.
+     *
+     * @return array{valid: bool, errors: list<string>, tags?: array<int, string>}
      */
     public function validate(string $qrCode, bool $isSimplified = false): array
     {
-        $errors = [];
-
         if (! $this->encoder->isValid($qrCode)) {
-            $errors[] = 'Invalid TLV encoding';
-
-            return ['valid' => false, 'errors' => $errors];
+            return ['valid' => false, 'errors' => ['Invalid TLV encoding']];
         }
 
         $tags = $this->decode($qrCode);
@@ -205,11 +174,44 @@ class QrGenerator
             $requiredTags[] = 9;
         }
 
+        $errors = [...$this->missingTagErrors($tags, $requiredTags), ...$this->tagFormatErrors($tags)];
+
+        return [
+            'valid' => empty($errors),
+            'errors' => $errors,
+            'tags' => $tags,
+        ];
+    }
+
+    /**
+     * An error for each required tag that is missing or empty.
+     *
+     * @param  array<int, string>  $tags
+     * @param  list<int>  $requiredTags
+     * @return list<string>
+     */
+    protected function missingTagErrors(array $tags, array $requiredTags): array
+    {
+        $errors = [];
+
         foreach ($requiredTags as $tag) {
             if (! isset($tags[$tag]) || empty($tags[$tag])) {
                 $errors[] = "Missing required tag {$tag}";
             }
         }
+
+        return $errors;
+    }
+
+    /**
+     * An error for each tag whose value is not in the shape ZATCA expects: the VAT number, the timestamp and the amounts.
+     *
+     * @param  array<int, string>  $tags
+     * @return list<string>
+     */
+    protected function tagFormatErrors(array $tags): array
+    {
+        $errors = [];
 
         // Validate VAT number format
         if (isset($tags[2]) && ! preg_match('/^3\d{14}$/', $tags[2])) {
@@ -230,21 +232,17 @@ class QrGenerator
             $errors[] = 'Invalid VAT amount format in tag 5';
         }
 
-        return [
-            'valid' => empty($errors),
-            'errors' => $errors,
-            'tags' => $tags,
-        ];
+        return $errors;
     }
 
     /**
-     * Check if timestamp is valid ISO 8601 format.
+     * Check if timestamp is valid ISO 8601 format, with a Z as a phase 1 code writes it or without one as
+     * a phase 2 code does.
      */
     protected function isValidTimestamp(string $timestamp): bool
     {
-        $date = \DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $timestamp);
-
-        return $date !== false;
+        return \DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $timestamp) !== false
+            || \DateTime::createFromFormat('Y-m-d\TH:i:s', $timestamp) !== false;
     }
 
     /**

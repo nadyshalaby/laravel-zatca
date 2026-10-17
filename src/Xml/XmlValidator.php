@@ -2,8 +2,11 @@
 
 namespace Corecave\Zatca\Xml;
 
+use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Exceptions\ValidationException;
+use Corecave\Zatca\Invoice\Amount;
 use DOMDocument;
+use DOMElement;
 
 class XmlValidator
 {
@@ -64,47 +67,31 @@ class XmlValidator
 
     /**
      * Validate required elements.
+     *
+     * @return list<string>
      */
     protected function validateRequiredElements(DOMDocument $doc): array
     {
-        $errors = [];
-        $xpath = $this->createXPath($doc);
-
-        $requiredElements = [
-            ['path' => '//cbc:ID', 'name' => 'Invoice ID'],
-            ['path' => '//cbc:UUID', 'name' => 'UUID'],
-            ['path' => '//cbc:IssueDate', 'name' => 'Issue Date'],
-            ['path' => '//cbc:InvoiceTypeCode', 'name' => 'Invoice Type Code'],
-            ['path' => '//cbc:DocumentCurrencyCode', 'name' => 'Document Currency Code'],
-            ['path' => '//cac:AccountingSupplierParty', 'name' => 'Supplier Party'],
-            ['path' => '//cac:TaxTotal', 'name' => 'Tax Total'],
-            ['path' => '//cac:LegalMonetaryTotal', 'name' => 'Legal Monetary Total'],
-            ['path' => '//cac:InvoiceLine', 'name' => 'Invoice Line'],
-        ];
-
-        foreach ($requiredElements as $element) {
-            $nodes = $xpath->query($element['path']);
-            if (! $nodes || $nodes->length === 0) {
-                $errors[] = "Missing required element: {$element['name']}";
-            }
-        }
-
-        // Validate ICV and PIH references
-        $icvNodes = $xpath->query("//cac:AdditionalDocumentReference[cbc:ID='ICV']");
-        if (! $icvNodes || $icvNodes->length === 0) {
-            $errors[] = 'Missing ICV (Invoice Counter Value) reference';
-        }
-
-        $pihNodes = $xpath->query("//cac:AdditionalDocumentReference[cbc:ID='PIH']");
-        if (! $pihNodes || $pihNodes->length === 0) {
-            $errors[] = 'Missing PIH (Previous Invoice Hash) reference';
-        }
-
-        return $errors;
+        return $this->missingElementErrors($this->createXPath($doc), [
+            '//cbc:ID' => 'Missing required element: Invoice ID',
+            '//cbc:UUID' => 'Missing required element: UUID',
+            '//cbc:IssueDate' => 'Missing required element: Issue Date',
+            '//cbc:InvoiceTypeCode' => 'Missing required element: Invoice Type Code',
+            '//cbc:DocumentCurrencyCode' => 'Missing required element: Document Currency Code',
+            '//cac:AccountingSupplierParty' => 'Missing required element: Supplier Party',
+            '//cac:TaxTotal' => 'Missing required element: Tax Total',
+            '//cac:LegalMonetaryTotal' => 'Missing required element: Legal Monetary Total',
+            '//cac:InvoiceLine' => 'Missing required element: Invoice Line',
+            // Validate ICV and PIH references
+            "//cac:AdditionalDocumentReference[cbc:ID='ICV']" => 'Missing ICV (Invoice Counter Value) reference',
+            "//cac:AdditionalDocumentReference[cbc:ID='PIH']" => 'Missing PIH (Previous Invoice Hash) reference',
+        ]);
     }
 
     /**
      * Validate invoice type code.
+     *
+     * @return list<string>
      */
     protected function validateInvoiceType(DOMDocument $doc): array
     {
@@ -113,7 +100,8 @@ class XmlValidator
 
         $typeCode = $xpath->query('//cbc:InvoiceTypeCode');
         if ($typeCode && $typeCode->length > 0) {
-            $code = $typeCode->item(0)->nodeValue;
+            $typeNode = $typeCode->item(0);
+            $code = $typeNode->nodeValue;
             $validCodes = ['388', '381', '383'];
 
             if (! in_array($code, $validCodes)) {
@@ -121,7 +109,7 @@ class XmlValidator
             }
 
             // Validate sub-type (name attribute)
-            $name = $typeCode->item(0)->getAttribute('name');
+            $name = $typeNode instanceof DOMElement ? $typeNode->getAttribute('name') : '';
             if (empty($name)) {
                 $errors[] = 'Invoice type code missing name attribute (sub-type)';
             }
@@ -132,6 +120,8 @@ class XmlValidator
 
     /**
      * Validate seller information.
+     *
+     * @return list<string>
      */
     protected function validateSeller(DOMDocument $doc): array
     {
@@ -166,6 +156,8 @@ class XmlValidator
 
     /**
      * Validate line items.
+     *
+     * @return list<string>
      */
     protected function validateLineItems(DOMDocument $doc): array
     {
@@ -181,42 +173,8 @@ class XmlValidator
         }
 
         foreach ($lines as $index => $line) {
-            $lineNum = $index + 1;
-
-            // Line ID
-            $id = $xpath->query('cbc:ID', $line);
-            if (! $id || $id->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing line ID";
-            }
-
-            // Quantity
-            $qty = $xpath->query('cbc:InvoicedQuantity', $line);
-            if (! $qty || $qty->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing quantity";
-            }
-
-            // Line extension amount
-            $lineExt = $xpath->query('cbc:LineExtensionAmount', $line);
-            if (! $lineExt || $lineExt->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing line extension amount";
-            }
-
-            // Item name
-            $itemName = $xpath->query('cac:Item/cbc:Name', $line);
-            if (! $itemName || $itemName->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing item name";
-            }
-
-            // Price
-            $price = $xpath->query('cac:Price/cbc:PriceAmount', $line);
-            if (! $price || $price->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing price amount";
-            }
-
-            // Tax category
-            $taxCat = $xpath->query('cac:Item/cac:ClassifiedTaxCategory/cbc:ID', $line);
-            if (! $taxCat || $taxCat->length === 0) {
-                $errors[] = "Line {$lineNum}: Missing tax category";
+            if ($line instanceof DOMElement) {
+                array_push($errors, ...$this->validateLine($xpath, $line, $index + 1));
             }
         }
 
@@ -224,49 +182,90 @@ class XmlValidator
     }
 
     /**
+     * Validate one invoice line's required elements.
+     *
+     * @return list<string>
+     */
+    protected function validateLine(\DOMXPath $xpath, \DOMNode $line, int $lineNum): array
+    {
+        $errors = $this->missingElementErrors($xpath, [
+            'cbc:ID' => 'Missing line ID',
+            'cbc:InvoicedQuantity' => 'Missing quantity',
+            'cbc:LineExtensionAmount' => 'Missing line extension amount',
+            'cac:Item/cbc:Name' => 'Missing item name',
+            'cac:Price/cbc:PriceAmount' => 'Missing price amount',
+            'cac:Item/cac:ClassifiedTaxCategory/cbc:ID' => 'Missing tax category',
+        ], $line);
+
+        return array_map(fn (string $error) => "Line {$lineNum}: {$error}", $errors);
+    }
+
+    /**
      * Validate totals.
+     *
+     * @return list<string>
      */
     protected function validateTotals(DOMDocument $doc): array
     {
-        $errors = [];
         $xpath = $this->createXPath($doc);
 
-        // Tax total
+        $errors = $this->missingElementErrors($xpath, [
+            '//cac:TaxTotal/cbc:TaxAmount' => 'Missing tax total amount',
+            '//cac:LegalMonetaryTotal/cbc:LineExtensionAmount' => 'Missing line extension amount in legal monetary total',
+            '//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount' => 'Missing tax exclusive amount in legal monetary total',
+            '//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount' => 'Missing tax inclusive amount in legal monetary total',
+            '//cac:LegalMonetaryTotal/cbc:PayableAmount' => 'Missing payable amount in legal monetary total',
+        ]);
+
+        return array_merge($errors, $this->taxInclusiveMismatchErrors($xpath));
+    }
+
+    /**
+     * Validate amounts match: the tax inclusive amount is the line extension amount plus the tax.
+     *
+     * @return list<string>
+     */
+    protected function taxInclusiveMismatchErrors(\DOMXPath $xpath): array
+    {
         $taxTotal = $xpath->query('//cac:TaxTotal/cbc:TaxAmount');
-        if (! $taxTotal || $taxTotal->length === 0) {
-            $errors[] = 'Missing tax total amount';
-        }
-
-        // Legal monetary total
         $lineExt = $xpath->query('//cac:LegalMonetaryTotal/cbc:LineExtensionAmount');
-        if (! $lineExt || $lineExt->length === 0) {
-            $errors[] = 'Missing line extension amount in legal monetary total';
-        }
-
-        $taxExcl = $xpath->query('//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount');
-        if (! $taxExcl || $taxExcl->length === 0) {
-            $errors[] = 'Missing tax exclusive amount in legal monetary total';
-        }
-
         $taxIncl = $xpath->query('//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount');
-        if (! $taxIncl || $taxIncl->length === 0) {
-            $errors[] = 'Missing tax inclusive amount in legal monetary total';
+
+        if (! $lineExt || $lineExt->length === 0 || ! $taxTotal || $taxTotal->length === 0 || ! $taxIncl || $taxIncl->length === 0) {
+            return [];
         }
 
-        $payable = $xpath->query('//cac:LegalMonetaryTotal/cbc:PayableAmount');
-        if (! $payable || $payable->length === 0) {
-            $errors[] = 'Missing payable amount in legal monetary total';
+        try {
+            [$net, $tax, $gross] = array_map(
+                fn (\DOMNodeList $nodes) => Amount::of((string) $nodes->item(0)?->nodeValue),
+                [$lineExt, $taxTotal, $taxIncl]
+            );
+        } catch (InvoiceException $e) {
+            return [$e->getMessage()];
         }
 
-        // Validate amounts match
-        if ($lineExt && $lineExt->length > 0 && $taxTotal && $taxTotal->length > 0 && $taxIncl && $taxIncl->length > 0) {
-            $lineExtValue = (float) $lineExt->item(0)->nodeValue;
-            $taxValue = (float) $taxTotal->item(0)->nodeValue;
-            $taxInclValue = (float) $taxIncl->item(0)->nodeValue;
+        // Exact, in hundredths: the total with VAT is the total without it plus the VAT (BR-CO-15)
+        if ($gross->hundredths !== $net->hundredths + $tax->hundredths) {
+            return ["Tax inclusive amount ({$gross}) does not match line extension ({$net}) + tax ({$tax})"];
+        }
 
-            $expected = round($lineExtValue + $taxValue, 2);
-            if (abs($expected - $taxInclValue) > 0.01) {
-                $errors[] = "Tax inclusive amount ({$taxInclValue}) does not match line extension ({$lineExtValue}) + tax ({$taxValue})";
+        return [];
+    }
+
+    /**
+     * The messages of the required elements the XPath finds no node for, looked up from the context node when one is given.
+     *
+     * @param  array<string, string>  $requiredElements  XPath => the message when it finds nothing
+     * @return list<string>
+     */
+    protected function missingElementErrors(\DOMXPath $xpath, array $requiredElements, ?\DOMNode $context = null): array
+    {
+        $errors = [];
+
+        foreach ($requiredElements as $path => $message) {
+            $nodes = $xpath->query($path, $context);
+            if (! $nodes || $nodes->length === 0) {
+                $errors[] = $message;
             }
         }
 
@@ -288,6 +287,8 @@ class XmlValidator
 
     /**
      * Get validation errors without throwing exception.
+     *
+     * @return array<array-key, string>
      */
     public function getErrors(string $xml): array
     {

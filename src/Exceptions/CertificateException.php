@@ -31,9 +31,33 @@ class CertificateException extends ZatcaException
     /**
      * CSR generation failed.
      */
-    public static function csrGenerationFailed(string $reason): static
+    public static function csrGenerationFailed(string $reason, ?\Throwable $cause = null): static
     {
-        return new static("Failed to generate CSR: {$reason}");
+        return new static("Failed to generate CSR: {$reason}", 0, $cause);
+    }
+
+    /**
+     * ZATCA did not hand a compliance CSID over for the request.
+     */
+    public static function csidRequestFailed(\Throwable $cause): static
+    {
+        return new static("Failed to get compliance CSID: {$cause->getMessage()}", 0, $cause);
+    }
+
+    /**
+     * The text is not a certificate that can be read.
+     */
+    public static function unreadable(?\Throwable $cause = null): static
+    {
+        return new static('Invalid certificate: it cannot be read', 0, $cause);
+    }
+
+    /**
+     * The certificate decodes, but its expiry date does not.
+     */
+    public static function unreadableExpiry(?\Throwable $cause = null): static
+    {
+        return new static('Invalid certificate: its expiry date cannot be read', 0, $cause);
     }
 
     /**
@@ -50,5 +74,13 @@ class CertificateException extends ZatcaException
     public static function keyMismatch(): static
     {
         return new static('The private key does not match the certificate.');
+    }
+
+    /**
+     * A device's certificates read or stored before the device was chosen, so there is no set to use.
+     */
+    public static function noDevice(): static
+    {
+        return new static('Certificates belong to a device: choose it with forDevice() first.');
     }
 }

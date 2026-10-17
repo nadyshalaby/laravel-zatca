@@ -2,53 +2,59 @@
 
 namespace Corecave\Zatca\Hash;
 
+use Corecave\Zatca\Exceptions\InvoiceException;
 use Corecave\Zatca\Models\ZatcaInvoice;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+/**
+ * A device's invoice counter and hash chain. The manager the container holds belongs to no device:
+ * `forDevice()` gives the chain of the device that signs, and reading or writing a chain before that is
+ * refused.
+ */
 class HashChainManager
 {
-    /**
-     * The initial hash value for the first invoice.
-     * This is base64 of SHA-256 hash of "0".
-     */
-    private const INITIAL_HASH = 'NWZlY2ViNjZmZmMzNmY3Y2QzOTAzNmQ5MmUyOWZjNjBlOTA4ODNlMTNkNjUwNWQ2Njc0N2ZhZDc2YzM4OWQ1MA==';
+    private ?string $deviceId = null;
+
+    public function __construct(private readonly HashChainLock $lock = new HashChainLock) {}
 
     /**
-     * Get the next Invoice Counter Value (ICV).
-     * This must be atomic and sequential.
+     * The chain of one device: its counter, its hashes and its lock.
      */
-    public function getNextIcv(): int
+    public function forDevice(string $deviceId): static
     {
-        return DB::transaction(function () {
-            // PostgreSQL doesn't support FOR UPDATE with aggregate functions.
-            // Lock the table to ensure atomicity, then get max ICV.
-            $driver = DB::connection()->getDriverName();
+        $chain = clone $this;
+        $chain->deviceId = $deviceId;
 
-            if ($driver === 'pgsql') {
-                // Use advisory lock for PostgreSQL
-                DB::select('SELECT pg_advisory_xact_lock(1)');
-            }
-
-            $maxIcv = ZatcaInvoice::max('icv');
-
-            return ($maxIcv ?? 0) + 1;
-        });
+        return $chain;
     }
 
     /**
-     * Get the Previous Invoice Hash (PIH).
-     * Returns the hash of the most recently generated invoice.
+     * The device's next Invoice Counter Value (ICV), under the device's lock. The lock is held until the
+     * caller's transaction ends, so that transaction must also record the invoice: no other issue of the
+     * device can take the same counter or read the hash before it.
+     *
+     * @throws InvoiceException when no device is chosen or no transaction is open
+     */
+    public function getNextIcv(): int
+    {
+        $this->lock->acquire(DB::connection(), $this->device());
+
+        return (int) $this->invoices()->max('icv') + 1;
+    }
+
+    /**
+     * The device's Previous Invoice Hash (PIH): the hash of its invoice with the highest counter, or the
+     * initial hash before its first.
+     *
+     * @throws InvoiceException when no device is chosen
      */
     public function getPreviousInvoiceHash(): string
     {
-        $lastInvoice = ZatcaInvoice::orderBy('icv', 'desc')->first();
+        $hash = $this->invoices()->orderByDesc('icv')->value('hash');
 
-        if (! $lastInvoice || empty($lastInvoice->hash)) {
-            return $this->getInitialHash();
-        }
-
-        return $lastInvoice->hash;
+        return is_string($hash) && $hash !== '' ? $hash : $this->getInitialHash();
     }
 
     /**
@@ -69,51 +75,36 @@ class HashChainManager
     }
 
     /**
-     * Record an invoice in the hash chain.
+     * Record an invoice in the device's hash chain.
+     *
+     * @throws InvoiceException when no device is chosen
      */
-    public function recordInvoice(
-        string $uuid,
-        int $icv,
-        string $invoiceNumber,
-        string $hash,
-        string $previousHash,
-        string $type,
-        string $subType,
-        float $totalAmount,
-        float $vatAmount,
-        ?string $xml = null,
-        ?string $signedXml = null,
-        ?string $qrCode = null,
-        ?string $referenceId = null
-    ): ZatcaInvoice {
+    public function recordInvoice(InvoiceRecord $record): ZatcaInvoice
+    {
         return ZatcaInvoice::create([
-            'uuid' => $uuid,
-            'icv' => $icv,
-            'invoice_number' => $invoiceNumber,
-            'type' => $type,
-            'subtype' => $subType,
-            'hash' => $hash,
-            'previous_hash' => $previousHash,
+            'device_id' => $this->device(),
+            'uuid' => $record->uuid,
+            'icv' => $record->icv,
+            'invoice_number' => $record->invoiceNumber,
+            'type' => $record->type,
+            'subtype' => $record->subType,
+            'hash' => $record->hash,
+            'previous_hash' => $record->previousHash,
             'status' => 'pending',
-            'xml' => $xml,
-            'signed_xml' => $signedXml,
-            'qr_code' => $qrCode,
-            'reference_id' => $referenceId,
-            'total_amount' => $totalAmount,
-            'vat_amount' => $vatAmount,
+            'xml' => $record->xml,
+            'signed_xml' => $record->signedXml,
+            'qr_code' => $record->qrCode,
+            'reference_id' => $record->referenceId,
+            'total_amount' => $record->totalAmount,
+            'vat_amount' => $record->vatAmount,
         ]);
     }
 
     /**
      * Update invoice status after ZATCA response.
      */
-    public function updateInvoiceStatus(
-        string $uuid,
-        string $status,
-        ?array $zatcaResponse = null,
-        ?string $signedXml = null,
-        ?string $qrCode = null
-    ): bool {
+    public function updateInvoiceStatus(string $uuid, string $status, StatusUpdate $update = new StatusUpdate): bool
+    {
         $invoice = ZatcaInvoice::where('uuid', $uuid)->first();
 
         if (! $invoice) {
@@ -122,16 +113,16 @@ class HashChainManager
 
         $invoice->status = $status;
 
-        if ($zatcaResponse !== null) {
-            $invoice->zatca_response = $zatcaResponse;
+        if ($update->zatcaResponse !== null) {
+            $invoice->zatca_response = $update->zatcaResponse;
         }
 
-        if ($signedXml !== null) {
-            $invoice->signed_xml = $signedXml;
+        if ($update->signedXml !== null) {
+            $invoice->signed_xml = $update->signedXml;
         }
 
-        if ($qrCode !== null) {
-            $invoice->qr_code = $qrCode;
+        if ($update->qrCode !== null) {
+            $invoice->qr_code = $update->qrCode;
         }
 
         return $invoice->save();
@@ -154,26 +145,20 @@ class HashChainManager
     }
 
     /**
-     * Verify the hash chain integrity.
+     * Verify the device's hash chain.
+     *
+     * @return array{valid: bool, checked: int, errors: list<array{icv: int, uuid: string, error: string, expected: string, actual: string}>}
      */
     public function verifyChain(?int $fromIcv = null, ?int $toIcv = null): array
     {
-        $query = ZatcaInvoice::orderBy('icv');
-
-        if ($fromIcv !== null) {
-            $query->where('icv', '>=', $fromIcv);
-        }
-
-        if ($toIcv !== null) {
-            $query->where('icv', '<=', $toIcv);
-        }
-
-        $invoices = $query->get();
         $errors = [];
-        $previousHash = $this->getInitialHash();
+        $checked = 0;
+        $previousHash = $this->hashBefore($fromIcv);
 
-        foreach ($invoices as $invoice) {
-            // Check if previous hash matches
+        // Read by counter in bounded chunks, so a long chain never sits in memory whole
+        foreach ($this->invoicesBetween($fromIcv, $toIcv)->lazyById(500, 'icv') as $invoice) {
+            $checked++;
+
             if ($invoice->previous_hash !== $previousHash) {
                 $errors[] = [
                     'icv' => $invoice->icv,
@@ -188,25 +173,54 @@ class HashChainManager
         }
 
         return [
-            'valid' => empty($errors),
-            'checked' => $invoices->count(),
+            'valid' => $errors === [],
+            'checked' => $checked,
             'errors' => $errors,
         ];
     }
 
     /**
-     * Get hash chain statistics.
+     * The hash the first invoice of a range must name: the hash of the highest counter below it, or the
+     * initial hash when the range starts the chain or the invoice below it has no hash.
+     */
+    protected function hashBefore(?int $fromIcv): string
+    {
+        if ($fromIcv === null) {
+            return $this->getInitialHash();
+        }
+
+        $hash = $this->invoices()->where('icv', '<', $fromIcv)->orderByDesc('icv')->value('hash');
+
+        return $hash ?? $this->getInitialHash();
+    }
+
+    /**
+     * The invoices whose counters fall in the range, either end left open when not given.
+     *
+     * @return Builder<ZatcaInvoice>
+     */
+    protected function invoicesBetween(?int $fromIcv, ?int $toIcv): Builder
+    {
+        return $this->invoices()
+            ->when($fromIcv !== null, fn (Builder $query) => $query->where('icv', '>=', $fromIcv))
+            ->when($toIcv !== null, fn (Builder $query) => $query->where('icv', '<=', $toIcv));
+    }
+
+    /**
+     * The device's chain statistics.
+     *
+     * @return array{total_invoices: int, pending: int, reported: int, cleared: int, rejected: int, last_icv: mixed, last_invoice_date: mixed}
      */
     public function getStatistics(): array
     {
         return [
-            'total_invoices' => ZatcaInvoice::count(),
-            'pending' => ZatcaInvoice::where('status', 'pending')->count(),
-            'reported' => ZatcaInvoice::where('status', 'reported')->count(),
-            'cleared' => ZatcaInvoice::where('status', 'cleared')->count(),
-            'rejected' => ZatcaInvoice::where('status', 'rejected')->count(),
-            'last_icv' => ZatcaInvoice::max('icv') ?? 0,
-            'last_invoice_date' => ZatcaInvoice::max('created_at'),
+            'total_invoices' => $this->invoices()->count(),
+            'pending' => $this->invoices()->where('status', 'pending')->count(),
+            'reported' => $this->invoices()->where('status', 'reported')->count(),
+            'cleared' => $this->invoices()->where('status', 'cleared')->count(),
+            'rejected' => $this->invoices()->where('status', 'rejected')->count(),
+            'last_icv' => $this->invoices()->max('icv') ?? 0,
+            'last_invoice_date' => $this->invoices()->max('created_at'),
         ];
     }
 
@@ -220,20 +234,30 @@ class HashChainManager
     }
 
     /**
-     * Check if an ICV is already used.
+     * Whether the device has used the counter.
      */
     public function isIcvUsed(int $icv): bool
     {
-        return ZatcaInvoice::where('icv', $icv)->exists();
+        return $this->invoices()->where('icv', $icv)->exists();
     }
 
     /**
-     * Get invoices in a date range.
+     * The device's invoices.
+     *
+     * @return Builder<ZatcaInvoice>
+     *
+     * @throws InvoiceException when no device is chosen
      */
-    public function getInvoicesInRange(string $startDate, string $endDate): \Illuminate\Database\Eloquent\Collection
+    protected function invoices(): Builder
     {
-        return ZatcaInvoice::whereBetween('created_at', [$startDate, $endDate])
-            ->orderBy('icv')
-            ->get();
+        return ZatcaInvoice::query()->where('device_id', $this->device());
+    }
+
+    /**
+     * @throws InvoiceException when no device is chosen
+     */
+    protected function device(): string
+    {
+        return $this->deviceId ?? throw InvoiceException::noDevice();
     }
 }

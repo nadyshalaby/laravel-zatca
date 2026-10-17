@@ -5,6 +5,8 @@ namespace Corecave\Zatca\Contracts;
 use Corecave\Zatca\Enums\InvoiceSubType;
 use Corecave\Zatca\Enums\InvoiceType;
 use Corecave\Zatca\Enums\PaymentMethod;
+use Corecave\Zatca\Invoice\DocumentTotals;
+use Corecave\Zatca\Invoice\VatGroup;
 use DateTimeInterface;
 
 interface InvoiceInterface
@@ -51,6 +53,8 @@ interface InvoiceInterface
 
     /**
      * Get seller information.
+     *
+     * @return array<string, mixed>
      */
     public function getSeller(): array;
 
@@ -61,33 +65,37 @@ interface InvoiceInterface
 
     /**
      * Get buyer information.
+     *
+     * @return array<string, mixed>|null
      */
     public function getBuyer(): ?array;
 
     /**
      * Get line items.
+     *
+     * @return array<int, LineItemInterface>
      */
     public function getLineItems(): array;
 
     /**
-     * Get the subtotal (before VAT).
+     * Get the sum of the line nets (BT-106, also BT-109), as priced.
      */
-    public function getSubtotal(): float;
+    public function getSubtotal(): string;
 
     /**
-     * Get total VAT amount.
+     * Get the total VAT (BT-110), the sum of the groups' tax, as priced.
      */
-    public function getTotalVat(): float;
+    public function getTotalVat(): string;
 
     /**
-     * Get total amount with VAT.
+     * Get the total with VAT (BT-112, also the payable amount BT-115), as priced.
      */
-    public function getTotalWithVat(): float;
+    public function getTotalWithVat(): string;
 
     /**
-     * Get total discount amount.
+     * Get the three totals, as priced.
      */
-    public function getTotalDiscount(): float;
+    public function getTotals(): DocumentTotals;
 
     /**
      * Get the currency code.
@@ -161,16 +169,22 @@ interface InvoiceInterface
 
     /**
      * Get additional notes.
+     *
+     * @return array<int, string>
      */
     public function getNotes(): array;
 
     /**
-     * Get VAT breakdown by category.
+     * Get the VAT groups (BT-116 to BT-121), as priced: one per category and rate.
+     *
+     * @return list<VatGroup>
      */
     public function getVatBreakdown(): array;
 
     /**
      * Convert to array.
+     *
+     * @return array<string, mixed>
      */
     public function toArray(): array;
 }

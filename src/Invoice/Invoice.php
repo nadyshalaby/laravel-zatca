@@ -24,8 +24,10 @@ class Invoice implements InvoiceInterface
 
     protected ?Carbon $supplyDate;
 
+    /** @var array<string, mixed> */
     protected array $seller;
 
+    /** @var array<string, mixed>|null */
     protected ?array $buyer;
 
     /** @var LineItemInterface[] */
@@ -47,42 +49,34 @@ class Invoice implements InvoiceInterface
 
     protected ?string $instructionNote;
 
+    /** @var array<int, string> */
     protected array $notes = [];
 
-    public function __construct(
-        string $uuid,
-        string $invoiceNumber,
-        InvoiceType $type,
-        InvoiceSubType $subType,
-        Carbon $issueDate,
-        array $seller,
-        int $icv,
-        string $previousInvoiceHash,
-        ?array $buyer = null,
-        ?Carbon $supplyDate = null,
-        string $currency = 'SAR',
-        ?PaymentMethod $paymentMethod = null,
-        ?string $paymentTerms = null,
-        ?string $originalInvoiceReference = null,
-        ?string $instructionNote = null,
-        array $notes = []
-    ) {
-        $this->uuid = $uuid;
-        $this->invoiceNumber = $invoiceNumber;
-        $this->type = $type;
-        $this->subType = $subType;
-        $this->issueDate = $issueDate;
-        $this->seller = $seller;
-        $this->icv = $icv;
-        $this->previousInvoiceHash = $previousInvoiceHash;
-        $this->buyer = $buyer;
-        $this->supplyDate = $supplyDate;
-        $this->currency = $currency;
-        $this->paymentMethod = $paymentMethod;
-        $this->paymentTerms = $paymentTerms;
-        $this->originalInvoiceReference = $originalInvoiceReference;
-        $this->instructionNote = $instructionNote;
-        $this->notes = $notes;
+    /** @var list<VatGroup> */
+    protected array $vatGroups;
+
+    protected DocumentTotals $totals;
+
+    public function __construct(InvoiceData $data)
+    {
+        $this->uuid = $data->uuid;
+        $this->invoiceNumber = $data->invoiceNumber;
+        $this->type = $data->type;
+        $this->subType = $data->subType;
+        $this->issueDate = $data->issueDate;
+        $this->seller = $data->seller;
+        $this->icv = $data->icv;
+        $this->previousInvoiceHash = $data->previousInvoiceHash;
+        $this->buyer = $data->buyer;
+        $this->supplyDate = $data->supplyDate;
+        $this->currency = $data->currency;
+        $this->paymentMethod = $data->paymentMethod;
+        $this->paymentTerms = $data->paymentTerms;
+        $this->originalInvoiceReference = $data->originalInvoiceReference;
+        $this->instructionNote = $data->instructionNote;
+        $this->notes = $data->notes;
+        $this->vatGroups = $data->vatGroups;
+        $this->totals = $data->totals;
     }
 
     /**
@@ -172,36 +166,24 @@ class Invoice implements InvoiceInterface
         return $this->lineItems;
     }
 
-    public function getSubtotal(): float
+    public function getSubtotal(): string
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getSubtotal(),
-            0
-        ), 2);
+        return $this->totals->net->value;
     }
 
-    public function getTotalVat(): float
+    public function getTotalVat(): string
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getVatAmount(),
-            0
-        ), 2);
+        return $this->totals->vat->value;
     }
 
-    public function getTotalWithVat(): float
+    public function getTotalWithVat(): string
     {
-        return round($this->getSubtotal() + $this->getTotalVat(), 2);
+        return $this->totals->gross->value;
     }
 
-    public function getTotalDiscount(): float
+    public function getTotals(): DocumentTotals
     {
-        return round(array_reduce(
-            $this->lineItems,
-            fn ($carry, LineItemInterface $item) => $carry + $item->getDiscount(),
-            0
-        ), 2);
+        return $this->totals;
     }
 
     public function getCurrency(): string
@@ -288,34 +270,7 @@ class Invoice implements InvoiceInterface
 
     public function getVatBreakdown(): array
     {
-        $breakdown = [];
-
-        foreach ($this->lineItems as $item) {
-            $category = $item->getVatCategory()->value;
-            $rate = $item->getVatRate();
-            $key = "{$category}_{$rate}";
-
-            if (! isset($breakdown[$key])) {
-                $breakdown[$key] = [
-                    'category' => $item->getVatCategory(),
-                    'rate' => $rate,
-                    'taxable_amount' => 0,
-                    'tax_amount' => 0,
-                    'exemption_reason' => $item->getVatExemptionReason(),
-                ];
-            }
-
-            $breakdown[$key]['taxable_amount'] += $item->getSubtotal();
-            $breakdown[$key]['tax_amount'] += $item->getVatAmount();
-        }
-
-        // Round the totals
-        foreach ($breakdown as $key => $data) {
-            $breakdown[$key]['taxable_amount'] = round($data['taxable_amount'], 2);
-            $breakdown[$key]['tax_amount'] = round($data['tax_amount'], 2);
-        }
-
-        return array_values($breakdown);
+        return $this->vatGroups;
     }
 
     public function toArray(): array
@@ -330,10 +285,7 @@ class Invoice implements InvoiceInterface
             'seller' => $this->seller,
             'buyer' => $this->buyer,
             'line_items' => array_map(fn ($item) => $item->toArray(), $this->lineItems),
-            'subtotal' => $this->getSubtotal(),
-            'total_vat' => $this->getTotalVat(),
-            'total_with_vat' => $this->getTotalWithVat(),
-            'total_discount' => $this->getTotalDiscount(),
+            'totals' => $this->totals->toArray(),
             'currency' => $this->currency,
             'icv' => $this->icv,
             'previous_invoice_hash' => $this->previousInvoiceHash,
@@ -343,7 +295,7 @@ class Invoice implements InvoiceInterface
             'original_invoice_reference' => $this->originalInvoiceReference,
             'instruction_note' => $this->instructionNote,
             'notes' => $this->notes,
-            'vat_breakdown' => $this->getVatBreakdown(),
+            'vat_breakdown' => array_map(fn (VatGroup $group) => $group->toArray(), $this->vatGroups),
         ];
     }
 }

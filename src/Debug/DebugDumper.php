@@ -2,6 +2,7 @@
 
 namespace Corecave\Zatca\Debug;
 
+use Corecave\Zatca\Invoice\InvoiceDocuments;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -11,10 +12,31 @@ use Illuminate\Support\Facades\File;
  */
 class DebugDumper
 {
+    /**
+     * What dump() writes after an invoice's id, one ending per kind of file.
+     */
+    private const FILE_ENDINGS = ['unsigned.xml', 'signed.xml', 'qr.txt', 'qr_decoded.json', 'qr_decode_error.txt', 'hash.txt'];
+
+    /**
+     * The names of the nine QR code tags, as the decoded QR file shows them.
+     */
+    private const QR_TAG_NAMES = [
+        1 => 'Seller Name',
+        2 => 'VAT Number',
+        3 => 'Timestamp',
+        4 => 'Total with VAT',
+        5 => 'VAT Amount',
+        6 => 'Invoice Hash',
+        7 => 'ECDSA Signature',
+        8 => 'ECDSA Public Key',
+        9 => 'ZATCA Signature',
+    ];
+
     protected bool $enabled;
 
     protected string $basePath;
 
+    /** @var array<string, mixed> */
     protected array $options;
 
     public function __construct()
@@ -71,7 +93,7 @@ class DebugDumper
             return null;
         }
 
-        return $this->dump($xml, $invoiceId, 'unsigned', 'xml');
+        return $this->dump($xml, $invoiceId, 'unsigned.xml');
     }
 
     /**
@@ -83,7 +105,7 @@ class DebugDumper
             return null;
         }
 
-        return $this->dump($xml, $invoiceId, 'signed', 'xml');
+        return $this->dump($xml, $invoiceId, 'signed.xml');
     }
 
     /**
@@ -96,17 +118,17 @@ class DebugDumper
         }
 
         // Dump both raw base64 and decoded info
-        $this->dump($qrCode, $invoiceId, 'qr', 'txt');
+        $this->dump($qrCode, $invoiceId, 'qr.txt');
 
         // Also dump human-readable QR info if possible
         try {
             $decoded = $this->decodeQrForDebug($qrCode);
-            $this->dump($decoded, $invoiceId, 'qr_decoded', 'json');
+            $this->dump($decoded, $invoiceId, 'qr_decoded.json');
         } catch (\Exception $e) {
-            // Ignore decode errors
+            $this->dump($e->getMessage(), $invoiceId, 'qr_decode_error.txt');
         }
 
-        return $this->getFilePath($invoiceId, 'qr', 'txt');
+        return $this->getFilePath($invoiceId, 'qr.txt');
     }
 
     /**
@@ -121,31 +143,28 @@ class DebugDumper
         $content = "Invoice Hash (Base64): {$hash}\n";
         $content .= 'Invoice Hash (Hex): '.bin2hex(base64_decode($hash))."\n";
 
-        return $this->dump($content, $invoiceId, 'hash', 'txt');
+        return $this->dump($content, $invoiceId, 'hash.txt');
     }
 
     /**
      * Dump all invoice artifacts at once.
+     *
+     * @return array<string, string>
      */
-    public function dumpAll(
-        string $invoiceId,
-        ?string $unsignedXml = null,
-        ?string $signedXml = null,
-        ?string $qrCode = null,
-        ?string $hash = null
-    ): array {
+    public function dumpAll(string $invoiceId, InvoiceDocuments $documents = new InvoiceDocuments, ?string $hash = null): array
+    {
         $files = [];
 
-        if ($unsignedXml !== null) {
-            $files['unsigned_xml'] = $this->dumpUnsignedXml($unsignedXml, $invoiceId);
+        if ($documents->unsignedXml !== null) {
+            $files['unsigned_xml'] = $this->dumpUnsignedXml($documents->unsignedXml, $invoiceId);
         }
 
-        if ($signedXml !== null) {
-            $files['signed_xml'] = $this->dumpSignedXml($signedXml, $invoiceId);
+        if ($documents->signedXml !== null) {
+            $files['signed_xml'] = $this->dumpSignedXml($documents->signedXml, $invoiceId);
         }
 
-        if ($qrCode !== null) {
-            $files['qr_code'] = $this->dumpQrCode($qrCode, $invoiceId);
+        if ($documents->qrCode !== null) {
+            $files['qr_code'] = $this->dumpQrCode($documents->qrCode, $invoiceId);
         }
 
         if ($hash !== null) {
@@ -164,13 +183,20 @@ class DebugDumper
     }
 
     /**
-     * List all debug files for an invoice.
+     * List all debug files for an invoice: its id, the stamp when files are stamped, then one of the endings dump() writes.
+     *
+     * @return list<string>
      */
     public function listFiles(string $invoiceId): array
     {
-        $pattern = $this->basePath.'/'.$this->sanitizeFilename($invoiceId).'*';
+        $id = $this->sanitizeFilename($invoiceId);
+        $endings = implode('|', array_map(fn (string $ending): string => preg_quote($ending, '/'), self::FILE_ENDINGS));
+        $ownName = '/^'.preg_quote($id, '/').'(_\d{8}_\d{6})?_('.$endings.')$/';
 
-        return glob($pattern) ?: [];
+        return array_values(array_filter(
+            glob($this->basePath.'/'.$id.'_*') ?: [],
+            fn (string $path): bool => preg_match($ownName, basename($path)) === 1,
+        ));
     }
 
     /**
@@ -197,12 +223,14 @@ class DebugDumper
 
     /**
      * Dump content to file.
+     *
+     * @param  string  $fileEnding  What follows the invoice ID in the file name, such as "signed.xml"
      */
-    protected function dump(string $content, string $invoiceId, string $suffix, string $extension): string
+    protected function dump(string $content, string $invoiceId, string $fileEnding): string
     {
         $this->ensureDirectoryExists();
 
-        $filePath = $this->getFilePath($invoiceId, $suffix, $extension);
+        $filePath = $this->getFilePath($invoiceId, $fileEnding);
 
         File::put($filePath, $content);
 
@@ -212,7 +240,7 @@ class DebugDumper
     /**
      * Get file path for dump.
      */
-    protected function getFilePath(string $invoiceId, string $suffix, string $extension): string
+    protected function getFilePath(string $invoiceId, string $fileEnding): string
     {
         $filename = $this->sanitizeFilename($invoiceId);
 
@@ -220,7 +248,7 @@ class DebugDumper
             $filename .= '_'.date('Ymd_His');
         }
 
-        $filename .= "_{$suffix}.{$extension}";
+        $filename .= "_{$fileEnding}";
 
         return $this->basePath.'/'.$filename;
     }
@@ -253,63 +281,72 @@ class DebugDumper
         $offset = 0;
         $tlvLength = strlen($tlv);
 
-        $tagNames = [
-            1 => 'Seller Name',
-            2 => 'VAT Number',
-            3 => 'Timestamp',
-            4 => 'Total with VAT',
-            5 => 'VAT Amount',
-            6 => 'Invoice Hash',
-            7 => 'ECDSA Signature',
-            8 => 'ECDSA Public Key',
-            9 => 'ZATCA Signature',
-        ];
-
         while ($offset < $tlvLength) {
-            $tag = ord($tlv[$offset]);
-            $offset++;
-
-            $length = ord($tlv[$offset]);
-            $offset++;
-
-            // Handle multi-byte length
-            if ($length > 127) {
-                $numBytes = $length & 0x7F;
-                $length = 0;
-                for ($i = 0; $i < $numBytes; $i++) {
-                    $length = ($length << 8) | ord($tlv[$offset]);
-                    $offset++;
-                }
-            }
+            [$tag, $length, $offset] = $this->readTlvHeader($tlv, $offset);
 
             $value = substr($tlv, $offset, $length);
             $offset += $length;
 
-            $tagName = $tagNames[$tag] ?? "Tag {$tag}";
-
-            // For binary data (tags 6-9), show as hex
-            if ($tag >= 6) {
-                $displayValue = bin2hex($value);
-                $tags[] = [
-                    'tag' => $tag,
-                    'name' => $tagName,
-                    'length' => $length,
-                    'value_hex' => $displayValue,
-                ];
-            } else {
-                $tags[] = [
-                    'tag' => $tag,
-                    'name' => $tagName,
-                    'length' => $length,
-                    'value' => $value,
-                ];
-            }
+            $tags[] = $this->describeTlvTag($tag, $length, $value);
         }
 
         return json_encode([
             'qr_base64_length' => strlen($qrCode),
             'tlv_raw_length' => $tlvLength,
             'tags' => $tags,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Read the tag number and the value length at the offset, a length above 127 spread over the bytes it counts.
+     *
+     * @return array{0: int, 1: int, 2: int} the tag, the value length and the offset of the value
+     */
+    protected function readTlvHeader(string $tlv, int $offset): array
+    {
+        $tag = ord($tlv[$offset]);
+        $offset++;
+
+        $length = ord($tlv[$offset]);
+        $offset++;
+
+        // Handle multi-byte length
+        if ($length > 127) {
+            $numBytes = $length & 0x7F;
+            $length = 0;
+            for ($i = 0; $i < $numBytes; $i++) {
+                $length = ($length << 8) | ord($tlv[$offset]);
+                $offset++;
+            }
+        }
+
+        return [$tag, $length, $offset];
+    }
+
+    /**
+     * One QR code tag as the decoded file shows it, the binary tags 6 to 9 as hex.
+     *
+     * @return array<string, int|string>
+     */
+    protected function describeTlvTag(int $tag, int $length, string $value): array
+    {
+        $tagName = self::QR_TAG_NAMES[$tag] ?? "Tag {$tag}";
+
+        // For binary data (tags 6-9), show as hex
+        if ($tag >= 6) {
+            return [
+                'tag' => $tag,
+                'name' => $tagName,
+                'length' => $length,
+                'value_hex' => bin2hex($value),
+            ];
+        }
+
+        return [
+            'tag' => $tag,
+            'name' => $tagName,
+            'length' => $length,
+            'value' => $value,
+        ];
     }
 }

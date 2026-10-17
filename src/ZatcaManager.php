@@ -4,6 +4,7 @@ namespace Corecave\Zatca;
 
 use Corecave\Zatca\Certificate\Certificate;
 use Corecave\Zatca\Certificate\CertificateManager;
+use Corecave\Zatca\Certificate\CertificateVatReader;
 use Corecave\Zatca\Certificate\CsrGenerator;
 use Corecave\Zatca\Contracts\ApiClientInterface;
 use Corecave\Zatca\Contracts\CertificateInterface;
@@ -13,9 +14,12 @@ use Corecave\Zatca\Exceptions\CertificateException;
 use Corecave\Zatca\Hash\HashChainManager;
 use Corecave\Zatca\Invoice\InvoiceBuilder;
 use Corecave\Zatca\Qr\QrGenerator;
+use Corecave\Zatca\Qr\QrSignature;
 use Corecave\Zatca\Results\ClearanceResult;
 use Corecave\Zatca\Results\ProcessResult;
 use Corecave\Zatca\Results\ReportResult;
+use Corecave\Zatca\Results\Submission;
+use Corecave\Zatca\Xml\SignedInvoice;
 use Corecave\Zatca\Xml\UblGenerator;
 use Corecave\Zatca\Xml\XmlSigner;
 use Corecave\Zatca\Xml\XmlValidator;
@@ -30,9 +34,23 @@ class ZatcaManager
 
     protected ?DebugDumper $debugDumper = null;
 
+    protected ?string $deviceId = null;
+
     public function __construct(Application $app)
     {
         $this->app = $app;
+    }
+
+    /**
+     * The manager for one device: its certificates and its invoice chain.
+     */
+    public function forDevice(string $deviceId): static
+    {
+        $manager = clone $this;
+        $manager->deviceId = $deviceId;
+        $manager->client = null;
+
+        return $manager;
     }
 
     /**
@@ -44,11 +62,13 @@ class ZatcaManager
     }
 
     /**
-     * Get the certificate manager.
+     * The certificate manager, for the device when one is chosen.
      */
     public function certificate(): CertificateManager
     {
-        return $this->app->make(CertificateManager::class);
+        $manager = $this->app->make(CertificateManager::class);
+
+        return $this->deviceId === null ? $manager : $manager->forDevice($this->deviceId);
     }
 
     /**
@@ -67,8 +87,8 @@ class ZatcaManager
         if ($this->client === null) {
             $this->client = $this->app->make(ApiClientInterface::class);
 
-            // Set the production certificate if available
-            $certificate = $this->certificate()->getActive('production');
+            // Set the device's production certificate if a device is chosen and has one
+            $certificate = $this->deviceId === null ? null : $this->certificate()->getActive('production');
             if ($certificate) {
                 $this->client->setCertificate($certificate);
             }
@@ -110,11 +130,13 @@ class ZatcaManager
     }
 
     /**
-     * Get the hash chain manager.
+     * The hash chain manager, for the device when one is chosen.
      */
     public function hashChain(): HashChainManager
     {
-        return $this->app->make(HashChainManager::class);
+        $chain = $this->app->make(HashChainManager::class);
+
+        return $this->deviceId === null ? $chain : $chain->forDevice($this->deviceId);
     }
 
     /**
@@ -134,55 +156,30 @@ class ZatcaManager
      */
     public function report(InvoiceInterface $invoice): ReportResult
     {
-        $certificate = $this->certificate()->getActive('production');
-
-        if (! $certificate) {
-            throw CertificateException::notFound('production');
-        }
-
-        // Generate XML
-        $xml = $this->xml()->generate($invoice);
-
-        // Debug: dump unsigned XML
-        $this->debug()->dumpUnsignedXml($xml, $invoice->getInvoiceNumber());
-
-        // Generate hash
-        $hash = $this->signer()->generateInvoiceHash($xml);
-        $invoice->setHash($hash);
-
-        // Debug: dump hash
-        $this->debug()->dumpHash($hash, $invoice->getInvoiceNumber());
-
-        // Sign XML
-        $signedXml = $this->signer()->sign(
-            $xml,
-            $certificate->getPrivateKey(),
-            $certificate->getCertificatePem()
-        );
+        $certificate = $this->productionCertificate();
+        $signed = $this->signForSubmission($invoice, $certificate);
 
         // Generate QR code (per ZATCA spec):
         // Tag 7 = SignatureValue (base64 string)
         // Tag 8 = Public Key (raw DER bytes)
         // Tag 9 = Certificate Signature (raw bytes from X.509 cert)
-        $signatureValue = $this->signer()->getSignatureValue($signedXml);
-        $publicKeyDer = $certificate->getPublicKeyRaw();
-        $certificateSignature = $certificate->getCertificateSignature();
-        $qrCode = $this->qr()->generate($invoice, $signatureValue, $publicKeyDer, $certificateSignature);
+        $signature = $this->qrSignature($signed->signedXml, $certificate);
+        $qrCode = $this->qr()->generate($invoice, $signature);
 
         // Debug: dump QR code
         $this->debug()->dumpQrCode($qrCode, $invoice->getInvoiceNumber());
 
         // Add QR code to XML
-        $signedXml = $this->xml()->addQrCode($signedXml, $qrCode);
+        $signedXml = $this->xml()->addQrCode($signed->signedXml, $qrCode);
 
         // Debug: dump signed XML (with QR code)
         $this->debug()->dumpSignedXml($signedXml, $invoice->getInvoiceNumber());
 
         // Submit to ZATCA
         $this->client()->setCertificate($certificate);
-        $response = $this->client()->reportInvoice($signedXml, $hash, $invoice->getUuid());
+        $response = $this->client()->reportInvoice($signedXml, $signed->hash, $invoice->getUuid());
 
-        return new ReportResult($invoice, $signedXml, $qrCode, $response);
+        return new ReportResult(new Submission($invoice, $response), $signedXml, $qrCode);
     }
 
     /**
@@ -190,52 +187,29 @@ class ZatcaManager
      */
     public function clear(InvoiceInterface $invoice): ClearanceResult
     {
-        $certificate = $this->certificate()->getActive('production');
-
-        if (! $certificate) {
-            throw CertificateException::notFound('production');
-        }
-
-        // Generate XML
-        $xml = $this->xml()->generate($invoice);
-
-        // Debug: dump unsigned XML
-        $this->debug()->dumpUnsignedXml($xml, $invoice->getInvoiceNumber());
-
-        // Generate hash
-        $hash = $this->signer()->generateInvoiceHash($xml);
-        $invoice->setHash($hash);
-
-        // Debug: dump hash
-        $this->debug()->dumpHash($hash, $invoice->getInvoiceNumber());
-
-        // Sign XML
-        $signedXml = $this->signer()->sign(
-            $xml,
-            $certificate->getPrivateKey(),
-            $certificate->getCertificatePem()
-        );
+        $certificate = $this->productionCertificate();
+        $signed = $this->signForSubmission($invoice, $certificate);
 
         // Debug: dump signed XML (before clearance)
-        $this->debug()->dumpSignedXml($signedXml, $invoice->getInvoiceNumber());
+        $this->debug()->dumpSignedXml($signed->signedXml, $invoice->getInvoiceNumber());
 
         // Submit to ZATCA for clearance
         $this->client()->setCertificate($certificate);
-        $response = $this->client()->clearInvoice($signedXml, $hash, $invoice->getUuid());
+        $response = $this->client()->clearInvoice($signed->signedXml, $signed->hash, $invoice->getUuid());
 
         // Extract cleared XML and QR code from response
-        $clearedXml = $response['clearedInvoice'] ?? $signedXml;
+        $clearedXml = $response['clearedInvoice'] ?? $signed->signedXml;
         $qrCode = $this->xml()->extractQrCode($clearedXml);
 
         // Debug: dump cleared XML and QR code from ZATCA
-        if ($clearedXml !== $signedXml) {
+        if ($clearedXml !== $signed->signedXml) {
             $this->debug()->dumpSignedXml($clearedXml, $invoice->getInvoiceNumber().'_cleared');
         }
         if ($qrCode) {
             $this->debug()->dumpQrCode($qrCode, $invoice->getInvoiceNumber());
         }
 
-        return new ClearanceResult($invoice, $clearedXml, $qrCode, $response);
+        return new ClearanceResult(new Submission($invoice, $response), $clearedXml, $qrCode);
     }
 
     /**
@@ -267,11 +241,7 @@ class ZatcaManager
      */
     public function signXml(string $xml): string
     {
-        $certificate = $this->certificate()->getActive('production');
-
-        if (! $certificate) {
-            throw CertificateException::notFound('production');
-        }
+        $certificate = $this->productionCertificate();
 
         return $this->signer()->sign(
             $xml,
@@ -292,17 +262,11 @@ class ZatcaManager
      * Generate QR code for an invoice.
      *
      * @param  InvoiceInterface  $invoice  The invoice
-     * @param  string  $signatureValue  Base64 encoded SignatureValue from XML signature
-     * @param  string  $publicKey  Public key - raw SPKI DER bytes
-     * @param  string  $certificateSignature  Raw certificate signature bytes
+     * @param  QrSignature  $signature  The signature value, the public key (raw SPKI DER bytes) and the certificate signature bytes
      */
-    public function generateQrCode(
-        InvoiceInterface $invoice,
-        string $signatureValue,
-        string $publicKey,
-        string $certificateSignature
-    ): string {
-        return $this->qr()->generate($invoice, $signatureValue, $publicKey, $certificateSignature);
+    public function generateQrCode(InvoiceInterface $invoice, QrSignature $signature): string
+    {
+        return $this->qr()->generate($invoice, $signature);
     }
 
     /**
@@ -362,33 +326,11 @@ class ZatcaManager
         Log::info('ZATCA: Starting auto-onboard process');
 
         // Generate fresh CSR with config values
-        $csrGenerator = $this->csr();
-        $csrConfig = config('zatca.csr');
-
-        $csrData = $csrGenerator->generate([
-            'organization' => $csrConfig['organization'],
-            'organization_unit' => $csrConfig['organization_unit'],
-            'common_name' => $csrConfig['common_name'],
-            'vat_number' => $csrConfig['vat_number'],
-            'invoice_types' => $csrConfig['invoice_types'] ?? '1100',
-            'location' => $csrConfig['location'] ?? [],
-            'business_category' => $csrConfig['business_category'] ?? 'Technology',
-        ]);
+        $csrData = $this->csr()->generate($this->onboardingCsrSettings());
 
         Log::info('ZATCA: CSR generated successfully');
 
-        // Request compliance CSID from ZATCA
-        $client = $this->app->make(ApiClientInterface::class);
-
-        try {
-            $response = $client->requestComplianceCsid($csrData['csr'], $otp);
-            Log::info('ZATCA: Compliance CSID received', [
-                'request_id' => $response['requestID'] ?? 'N/A',
-            ]);
-        } catch (\Exception $e) {
-            Log::error('ZATCA: Failed to get compliance CSID', ['error' => $e->getMessage()]);
-            throw CertificateException::csrGenerationFailed('Failed to get compliance CSID: '.$e->getMessage());
-        }
+        $response = $this->requestComplianceCsid($csrData['csr'], $otp);
 
         // Create and store certificate
         $certificate = Certificate::fromApiResponse($response, $csrData['private_key'], 'compliance');
@@ -404,47 +346,61 @@ class ZatcaManager
     }
 
     /**
+     * The CSR settings onboarding uses: the configured ones, with the optional ones filled in.
+     *
+     * @return array<string, mixed>
+     */
+    protected function onboardingCsrSettings(): array
+    {
+        $csrConfig = config('zatca.csr');
+
+        return [
+            'organization' => $csrConfig['organization'],
+            'organization_unit' => $csrConfig['organization_unit'],
+            'common_name' => $csrConfig['common_name'],
+            'vat_number' => $csrConfig['vat_number'],
+            'invoice_types' => $csrConfig['invoice_types'] ?? '1100',
+            'location' => $csrConfig['location'] ?? [],
+            'business_category' => $csrConfig['business_category'] ?? 'Technology',
+        ];
+    }
+
+    /**
+     * Request a compliance CSID from ZATCA for the CSR.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws CertificateException when ZATCA refuses it
+     */
+    protected function requestComplianceCsid(string $csr, string $otp): array
+    {
+        $client = $this->app->make(ApiClientInterface::class);
+
+        try {
+            $response = $client->requestComplianceCsid($csr, $otp);
+            Log::info('ZATCA: Compliance CSID received', [
+                'request_id' => $response['requestID'] ?? 'N/A',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('ZATCA: Failed to get compliance CSID', ['error' => $e->getMessage()]);
+            throw CertificateException::csidRequestFailed($e);
+        }
+
+        return $response;
+    }
+
+    /**
      * Check if a certificate's embedded VAT matches the config VAT.
      */
     protected function certificateMatchesConfig(CertificateInterface $cert): bool
     {
-        try {
-            $configVat = config('zatca.csr.vat_number');
-            if (! $configVat) {
-                return true; // No config VAT to check against
-            }
-
-            $x509 = new \phpseclib3\File\X509;
-            $certData = $x509->loadX509($cert->getCertificatePem());
-
-            // Find VAT in Subject Alternative Name extension
-            if (isset($certData['tbsCertificate']['extensions'])) {
-                foreach ($certData['tbsCertificate']['extensions'] as $ext) {
-                    if (isset($ext['extnId']) && $ext['extnId'] === 'id-ce-subjectAltName') {
-                        foreach ($ext['extnValue'] as $san) {
-                            if (isset($san['directoryName']['rdnSequence'])) {
-                                foreach ($san['directoryName']['rdnSequence'] as $rdn) {
-                                    foreach ($rdn as $attr) {
-                                        // OID for UID (VAT Number)
-                                        if ($attr['type'] === '0.9.2342.19200300.100.1.1') {
-                                            $certVat = $attr['value']['utf8String'] ?? null;
-
-                                            return $certVat === $configVat;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            return false;
-        } catch (\Exception $e) {
-            Log::warning('ZATCA: Could not verify certificate VAT', ['error' => $e->getMessage()]);
-
-            return false;
+        $configVat = config('zatca.csr.vat_number');
+        if (! $configVat) {
+            return true; // No config VAT to check against
         }
+
+        // A text that is not a certificate names no VAT number, so it never matches
+        return (new CertificateVatReader)->read($cert) === $configVat;
     }
 
     /**
@@ -460,6 +416,39 @@ class ZatcaManager
         // Force new certificate
         $certificate = $this->getOrCreateCertificate(forceNew: true);
 
+        $signed = $this->signForSubmission($invoice, $certificate);
+
+        // Debug: dump signed XML
+        $this->debug()->dumpSignedXml($signed->signedXml, $invoice->getInvoiceNumber());
+
+        return [
+            'certificate' => $certificate,
+            'signedXml' => $signed->signedXml,
+            'hash' => $signed->hash,
+        ];
+    }
+
+    /**
+     * The active production certificate.
+     *
+     * @throws CertificateException when there is none
+     */
+    protected function productionCertificate(): CertificateInterface
+    {
+        $certificate = $this->certificate()->getActive('production');
+
+        if (! $certificate) {
+            throw CertificateException::notFound('production');
+        }
+
+        return $certificate;
+    }
+
+    /**
+     * Generate the invoice's XML, stamp the invoice with its hash and sign the XML, dumping each step for debugging.
+     */
+    protected function signForSubmission(InvoiceInterface $invoice, CertificateInterface $certificate): SignedInvoice
+    {
         // Generate XML
         $xml = $this->xml()->generate($invoice);
 
@@ -480,13 +469,18 @@ class ZatcaManager
             $certificate->getCertificatePem()
         );
 
-        // Debug: dump signed XML
-        $this->debug()->dumpSignedXml($signedXml, $invoice->getInvoiceNumber());
+        return new SignedInvoice($hash, $signedXml);
+    }
 
-        return [
-            'certificate' => $certificate,
-            'signedXml' => $signedXml,
-            'hash' => $hash,
-        ];
+    /**
+     * What the QR code takes from the signed XML and the certificate.
+     */
+    protected function qrSignature(string $signedXml, CertificateInterface $certificate): QrSignature
+    {
+        return new QrSignature(
+            $this->signer()->getSignatureValue($signedXml),
+            $certificate->getPublicKeyRaw(),
+            $certificate->getCertificateSignature()
+        );
     }
 }

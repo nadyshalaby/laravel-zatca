@@ -3,10 +3,13 @@
 namespace Corecave\Zatca\Models;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property int $id
+ * @property string $device_id
  * @property string $uuid
  * @property int $icv
  * @property string $invoice_number
@@ -18,10 +21,10 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $xml
  * @property string|null $signed_xml
  * @property string|null $qr_code
- * @property array|null $zatca_response
+ * @property array<string, mixed>|null $zatca_response
  * @property string|null $reference_id
- * @property float $total_amount
- * @property float $vat_amount
+ * @property string $total_amount
+ * @property string $vat_amount
  * @property Carbon $created_at
  * @property Carbon $updated_at
  */
@@ -38,9 +41,10 @@ class ZatcaInvoice extends Model
     /**
      * The attributes that are mass assignable.
      *
-     * @var array<string>
+     * @var list<string>
      */
     protected $fillable = [
+        'device_id',
         'uuid',
         'icv',
         'invoice_number',
@@ -56,8 +60,6 @@ class ZatcaInvoice extends Model
         'reference_id',
         'total_amount',
         'vat_amount',
-        'invoiceable_type',
-        'invoiceable_id',
     ];
 
     /**
@@ -74,64 +76,88 @@ class ZatcaInvoice extends Model
 
     /**
      * Scope for status.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeStatus($query, string $status)
+    public function scopeStatus(Builder $query, string $status): Builder
     {
         return $query->where('status', $status);
     }
 
     /**
      * Scope for pending invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopePending($query)
+    public function scopePending(Builder $query): Builder
     {
         return $query->where('status', 'pending');
     }
 
     /**
      * Scope for reported invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeReported($query)
+    public function scopeReported(Builder $query): Builder
     {
         return $query->where('status', 'reported');
     }
 
     /**
      * Scope for cleared invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeCleared($query)
+    public function scopeCleared(Builder $query): Builder
     {
         return $query->where('status', 'cleared');
     }
 
     /**
      * Scope for rejected invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeRejected($query)
+    public function scopeRejected(Builder $query): Builder
     {
         return $query->where('status', 'rejected');
     }
 
     /**
      * Scope for invoice type.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeOfType($query, string $type)
+    public function scopeOfType(Builder $query, string $type): Builder
     {
         return $query->where('type', $type);
     }
 
     /**
      * Scope for standard invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeStandard($query)
+    public function scopeStandard(Builder $query): Builder
     {
         return $query->where('type', 'standard');
     }
 
     /**
      * Scope for simplified invoices.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
      */
-    public function scopeSimplified($query)
+    public function scopeSimplified(Builder $query): Builder
     {
         return $query->where('type', 'simplified');
     }
@@ -163,7 +189,7 @@ class ZatcaInvoice extends Model
     /**
      * Get the original invoice (for credit/debit notes).
      */
-    public function originalInvoice()
+    public function originalInvoice(): ?self
     {
         if ($this->reference_id === null) {
             return null;
@@ -174,14 +200,18 @@ class ZatcaInvoice extends Model
 
     /**
      * Get related credit/debit notes.
+     *
+     * @return Collection<int, self>
      */
-    public function relatedNotes()
+    public function relatedNotes(): Collection
     {
         return self::where('reference_id', $this->invoice_number)->get();
     }
 
     /**
      * Get validation errors from ZATCA response.
+     *
+     * @return array<array-key, mixed>
      */
     public function getValidationErrors(): array
     {
@@ -190,77 +220,11 @@ class ZatcaInvoice extends Model
 
     /**
      * Get validation warnings from ZATCA response.
+     *
+     * @return array<array-key, mixed>
      */
     public function getValidationWarnings(): array
     {
         return $this->zatca_response['validationResults']['warningMessages'] ?? [];
-    }
-
-    /**
-     * Get the parent invoiceable model (Order or Booking).
-     */
-    public function invoiceable()
-    {
-        return $this->morphTo();
-    }
-
-    /**
-     * Scope for invoices belonging to a specific model type.
-     */
-    public function scopeForModel($query, string $modelClass)
-    {
-        return $query->where('invoiceable_type', $modelClass);
-    }
-
-    /**
-     * Scope for invoices belonging to a specific entity.
-     */
-    public function scopeForEntity($query, $entity)
-    {
-        return $query->where('invoiceable_type', get_class($entity))
-            ->where('invoiceable_id', $entity->id);
-    }
-
-    /**
-     * Get QR code as PNG image (base64 encoded).
-     *
-     * Generates a PNG image from the TLV QR code data using SimpleSoftwareIO/QrCode.
-     */
-    public function getQrCodeImageAttribute(): ?string
-    {
-        if (empty($this->qr_code)) {
-            return null;
-        }
-
-        try {
-            // Generate QR code as base64 PNG using SimpleSoftwareIO/QrCode
-            $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('png')
-                ->size(200)
-                ->margin(1)
-                ->generate($this->qr_code);
-
-            return base64_encode($qrCode);
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Get QR code as SVG string.
-     */
-    public function getQrCodeSvgAttribute(): ?string
-    {
-        if (empty($this->qr_code)) {
-            return null;
-        }
-
-        try {
-            return \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')
-                ->size(200)
-                ->margin(1)
-                ->generate($this->qr_code);
-        } catch (\Exception $e) {
-            return null;
-        }
     }
 }

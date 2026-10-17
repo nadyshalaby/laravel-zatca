@@ -12,18 +12,15 @@ class ReportResult
 
     protected string $qrCode;
 
+    /** @var array<string, mixed> */
     protected array $response;
 
-    public function __construct(
-        InvoiceInterface $invoice,
-        string $signedXml,
-        string $qrCode,
-        array $response
-    ) {
-        $this->invoice = $invoice;
+    public function __construct(Submission $submission, string $signedXml, string $qrCode)
+    {
+        $this->invoice = $submission->invoice;
         $this->signedXml = $signedXml;
         $this->qrCode = $qrCode;
-        $this->response = $response;
+        $this->response = $submission->response;
     }
 
     /**
@@ -62,6 +59,8 @@ class ReportResult
 
     /**
      * Get the ZATCA response.
+     *
+     * @return array<string, mixed>
      */
     public function getResponse(): array
     {
@@ -70,6 +69,8 @@ class ReportResult
 
     /**
      * Get validation errors.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getErrors(): array
     {
@@ -78,6 +79,8 @@ class ReportResult
 
     /**
      * Get validation warnings.
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function getWarnings(): array
     {
@@ -102,6 +105,8 @@ class ReportResult
 
     /**
      * Convert to array.
+     *
+     * @return array{success: bool, status: string, uuid: string, invoice_number: string, qr_code: string, errors: array<int, array<string, mixed>>, warnings: array<int, array<string, mixed>>}
      */
     public function toArray(): array
     {

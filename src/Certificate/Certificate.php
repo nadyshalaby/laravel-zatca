@@ -3,9 +3,12 @@
 namespace Corecave\Zatca\Certificate;
 
 use Carbon\Carbon;
+use Carbon\Exceptions\InvalidFormatException;
 use Corecave\Zatca\Contracts\CertificateInterface;
-use phpseclib3\Crypt\EC;
+use Corecave\Zatca\Exceptions\CertificateException;
+use phpseclib3\Crypt\Common\PublicKey;
 use phpseclib3\File\X509;
+use phpseclib3\Math\BigInteger;
 
 class Certificate implements CertificateInterface
 {
@@ -25,28 +28,28 @@ class Certificate implements CertificateInterface
 
     protected bool $active;
 
+    /** @var array<string, mixed> */
     protected array $metadata;
 
+    private ?X509 $decoded = null;
+
+    /** @var array<string, mixed>|null */
+    private ?array $decodedFields = null;
+
     public function __construct(
-        string $type,
-        string $certificate,
-        string $privateKey,
-        string $secret,
-        ?string $requestId = null,
-        ?Carbon $issuedAt = null,
-        ?Carbon $expiresAt = null,
-        bool $active = true,
-        array $metadata = []
+        CertificateOrigin $origin,
+        CertificateCredentials $credentials,
+        CertificateLifetime $lifetime = new CertificateLifetime
     ) {
-        $this->type = $type;
-        $this->certificate = $certificate;
-        $this->privateKey = $privateKey;
-        $this->secret = $secret;
-        $this->requestId = $requestId;
-        $this->issuedAt = $issuedAt;
-        $this->expiresAt = $expiresAt;
-        $this->active = $active;
-        $this->metadata = $metadata;
+        $this->type = $origin->type;
+        $this->certificate = $credentials->certificate;
+        $this->privateKey = $credentials->privateKey;
+        $this->secret = $credentials->secret;
+        $this->requestId = $origin->requestId;
+        $this->issuedAt = $lifetime->issuedAt;
+        $this->expiresAt = $lifetime->expiresAt;
+        $this->active = $lifetime->active;
+        $this->metadata = $origin->metadata;
 
         // If expiry not provided, try to extract from certificate
         if ($this->expiresAt === null) {
@@ -56,42 +59,41 @@ class Certificate implements CertificateInterface
 
     /**
      * Create from ZATCA API response.
+     *
+     * @param  array<string, mixed>  $response  ZATCA's JSON answer
      */
     public static function fromApiResponse(array $response, string $privateKey, string $type = 'compliance'): self
     {
         $certificate = base64_decode($response['binarySecurityToken'] ?? '');
         $secret = $response['secret'] ?? '';
         $requestId = $response['requestID'] ?? null;
+        $metadata = [
+            'disposition_message' => $response['dispositionMessage'] ?? null,
+            'token_type' => $response['tokenType'] ?? null,
+        ];
 
         return new self(
-            type: $type,
-            certificate: $certificate,
-            privateKey: $privateKey,
-            secret: $secret,
-            requestId: $requestId,
-            issuedAt: Carbon::now(),
-            metadata: [
-                'disposition_message' => $response['dispositionMessage'] ?? null,
-                'token_type' => $response['tokenType'] ?? null,
-            ]
+            new CertificateOrigin($type, $requestId, $metadata),
+            new CertificateCredentials($certificate, $privateKey, $secret),
+            new CertificateLifetime(issuedAt: Carbon::now())
         );
     }
 
     /**
      * Create from stored data.
+     *
+     * @param  array<string, mixed>  $data
      */
     public static function fromArray(array $data): self
     {
         return new self(
-            type: $data['type'],
-            certificate: $data['certificate'],
-            privateKey: $data['private_key'],
-            secret: $data['secret'],
-            requestId: $data['request_id'] ?? null,
-            issuedAt: isset($data['issued_at']) ? Carbon::parse($data['issued_at']) : null,
-            expiresAt: isset($data['expires_at']) ? Carbon::parse($data['expires_at']) : null,
-            active: $data['is_active'] ?? true,
-            metadata: $data['metadata'] ?? []
+            new CertificateOrigin($data['type'], $data['request_id'] ?? null, $data['metadata'] ?? []),
+            new CertificateCredentials($data['certificate'], $data['private_key'], $data['secret']),
+            new CertificateLifetime(
+                isset($data['issued_at']) ? Carbon::parse($data['issued_at']) : null,
+                isset($data['expires_at']) ? Carbon::parse($data['expires_at']) : null,
+                $data['is_active'] ?? true
+            )
         );
     }
 
@@ -164,7 +166,8 @@ class Certificate implements CertificateInterface
             return false;
         }
 
-        return $this->expiresAt->diffInDays(Carbon::now()) <= $days;
+        // Carbon 3 counts signed days from now to the expiry, so one already expired counts as expiring
+        return Carbon::now()->diffInDays($this->expiresAt) <= $days;
     }
 
     public function isProduction(): bool
@@ -207,17 +210,13 @@ class Certificate implements CertificateInterface
 
     public function getPublicKey(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        $publicKey = $this->decoded()->getPublicKey();
 
-            return $x509->getPublicKey()->toString('PKCS8');
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
-            $key = EC::loadPrivateKey($this->privateKey);
-
-            return $key->getPublicKey()->toString('PKCS8');
+        if (! $publicKey instanceof PublicKey) {
+            throw CertificateException::unreadable();
         }
+
+        return $publicKey->toString('PKCS8');
     }
 
     /**
@@ -228,40 +227,12 @@ class Certificate implements CertificateInterface
      */
     public function getPublicKeyRaw(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
-
-            // Get PKCS8 PEM and extract DER bytes
-            $pemKey = $x509->getPublicKey()->toString('PKCS8');
-
-            // Extract DER from PEM
-            $pemKey = str_replace(
-                ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
-                '',
-                $pemKey
-            );
-
-            return base64_decode($pemKey);
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
-            try {
-                $key = EC::loadPrivateKey($this->privateKey);
-                $pemKey = $key->getPublicKey()->toString('PKCS8');
-
-                $pemKey = str_replace(
-                    ['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\n", "\r"],
-                    '',
-                    $pemKey
-                );
-
-                return base64_decode($pemKey);
-            } catch (\Exception $e) {
-                return '';
-            }
-        }
+        return base64_decode($this->getRawPublicKey());
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getMetadata(): array
     {
         return $this->metadata;
@@ -269,6 +240,8 @@ class Certificate implements CertificateInterface
 
     /**
      * Convert to array for storage.
+     *
+     * @return array{type: string, certificate: string, private_key: string, secret: string, request_id: string|null, issued_at: string|null, expires_at: string|null, is_active: bool, metadata: array<string, mixed>}
      */
     public function toArray(): array
     {
@@ -290,56 +263,67 @@ class Certificate implements CertificateInterface
      */
     protected function extractExpiryFromCertificate(): void
     {
+        $this->expiresAt = $this->readExpiryFromCertificate();
+    }
+
+    /**
+     * Read the notAfter date from the certificate, or null when the body is not a certificate at all.
+     *
+     * @throws CertificateException when the certificate decodes but its expiry date does not
+     */
+    protected function readExpiryFromCertificate(): ?Carbon
+    {
         try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
-
-            if ($certData && isset($certData['tbsCertificate']['validity']['notAfter'])) {
-                $notAfter = $certData['tbsCertificate']['validity']['notAfter'];
-
-                if (isset($notAfter['utcTime'])) {
-                    $this->expiresAt = Carbon::parse($notAfter['utcTime']);
-                } elseif (isset($notAfter['generalTime'])) {
-                    $this->expiresAt = Carbon::parse($notAfter['generalTime']);
-                }
-            }
+            $certData = (new X509)->loadX509($this->getCertificatePem());
         } catch (\Exception $e) {
-            // Could not extract expiry, leave as null
+            throw CertificateException::unreadableExpiry($e);
+        }
+
+        if ($certData === false) {
+            return null;
+        }
+
+        $notAfter = $certData['tbsCertificate']['validity']['notAfter'] ?? [];
+        $time = $notAfter['utcTime'] ?? $notAfter['generalTime'] ?? null;
+
+        if ($time === null) {
+            return null;
+        }
+
+        // phpseclib hands an undecodable time over as false, which Carbon would read as 1970
+        if ($time === false) {
+            throw CertificateException::unreadableExpiry();
+        }
+
+        try {
+            return Carbon::parse($time);
+        } catch (InvalidFormatException $e) {
+            throw CertificateException::unreadableExpiry($e);
         }
     }
 
     /**
      * Get certificate subject information.
+     *
+     * @return array<string, mixed>
      */
     public function getSubject(): array
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        $subject = $this->decoded()->getDN(X509::DN_ARRAY);
 
-            return $x509->getDN(X509::DN_HASH);
-        } catch (\Exception $e) {
-            return [];
-        }
+        return is_array($subject) ? $subject : throw CertificateException::unreadable();
     }
 
     /**
      * Get certificate issuer information.
+     *
+     * @return array<string, mixed>
      */
     public function getIssuer(): array
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $issuer = $this->decodedFields()['tbsCertificate']['issuer'] ?? null;
 
-            if ($certData && isset($certData['tbsCertificate']['issuer'])) {
-                return $certData['tbsCertificate']['issuer'];
-            }
-
-            return [];
-        } catch (\Exception $e) {
-            return [];
-        }
+        return is_array($issuer) ? $issuer : throw CertificateException::unreadable();
     }
 
     /**
@@ -347,18 +331,9 @@ class Certificate implements CertificateInterface
      */
     public function getSerialNumber(): ?string
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $serialNumber = $this->decodedFields()['tbsCertificate']['serialNumber'] ?? null;
 
-            if ($certData && isset($certData['tbsCertificate']['serialNumber'])) {
-                return $certData['tbsCertificate']['serialNumber']->toString();
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            return null;
-        }
+        return $serialNumber instanceof BigInteger ? $serialNumber->toString() : throw CertificateException::unreadable();
     }
 
     /**
@@ -372,20 +347,11 @@ class Certificate implements CertificateInterface
      */
     public function getCertificateSignature(): string
     {
-        try {
-            $x509 = new X509;
-            $certData = $x509->loadX509($this->getCertificatePem());
+        $signature = $this->decodedFields()['signature'] ?? null;
 
-            if ($certData && isset($certData['signature'])) {
-                // phpseclib returns the signature as a binary string (BIT STRING contents)
-                // The first byte is the unused bits indicator - remove it
-                return substr($certData['signature'], 1);
-            }
-
-            return '';
-        } catch (\Exception $e) {
-            return '';
-        }
+        // phpseclib returns the signature as a binary string (BIT STRING contents)
+        // The first byte is the unused bits indicator - remove it
+        return is_string($signature) ? substr($signature, 1) : throw CertificateException::unreadable();
     }
 
     /**
@@ -400,28 +366,20 @@ class Certificate implements CertificateInterface
      */
     public function getFormattedIssuer(): string
     {
-        try {
-            $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
+        // Get issuer DN as string - phpseclib returns in correct format
+        $issuerDn = $this->decoded()->getIssuerDN(X509::DN_STRING);
 
-            // Get issuer DN as string - phpseclib returns in correct format
-            $issuerDn = $x509->getIssuerDN(X509::DN_STRING);
-
-            // Replace OID for domainComponent with DC if needed
-            // Keep the ", " separators (do NOT remove spaces!)
-            $issuerDn = str_replace('0.9.2342.19200300.100.1.25', 'DC', $issuerDn);
-
-            // phpseclib may use "/" as separator - convert to ", "
-            if (str_contains($issuerDn, '/')) {
-                $issuerDn = str_replace('/', ', ', $issuerDn);
-            }
-
-            // Ensure ", " separator format (comma + space)
-            // Do NOT reverse the order - keep as-is from certificate
-            return $issuerDn;
-        } catch (\Exception $e) {
-            return '';
+        if (! is_string($issuerDn)) {
+            throw CertificateException::unreadable();
         }
+
+        // Replace OID for domainComponent with DC if needed
+        // Keep the ", " separators (do NOT remove spaces!)
+        $issuerDn = str_replace('0.9.2342.19200300.100.1.25', 'DC', $issuerDn);
+
+        // phpseclib may use "/" as separator - convert to ", "
+        // Do NOT reverse the order - keep as-is from certificate
+        return str_replace('/', ', ', $issuerDn);
     }
 
     /**
@@ -455,32 +413,46 @@ class Certificate implements CertificateInterface
      */
     public function getRawPublicKey(): string
     {
-        try {
+        // Remove PEM headers and line breaks
+        return str_replace(
+            ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
+            '',
+            $this->getPublicKey()
+        );
+    }
+
+    /**
+     * The certificate decoded once, for every getter that reads it.
+     *
+     * @throws CertificateException when the text is not a certificate, with the cause where there is one
+     */
+    protected function decoded(): X509
+    {
+        if ($this->decoded === null) {
             $x509 = new X509;
-            $x509->loadX509($this->getCertificatePem());
 
-            $pemKey = $x509->getPublicKey()->toString('PKCS8');
-
-            // Remove PEM headers and line breaks
-            return str_replace(
-                ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
-                '',
-                $pemKey
-            );
-        } catch (\Exception $e) {
-            // Fallback: derive from private key
             try {
-                $key = EC::loadPrivateKey($this->privateKey);
-                $pemKey = $key->getPublicKey()->toString('PKCS8');
-
-                return str_replace(
-                    ["-----BEGIN PUBLIC KEY-----\r\n", "\r\n-----END PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n", "\n-----END PUBLIC KEY-----", "\r\n", "\n"],
-                    '',
-                    $pemKey
-                );
+                $fields = $x509->loadX509($this->getCertificatePem());
             } catch (\Exception $e) {
-                return '';
+                throw CertificateException::unreadable($e);
             }
+
+            $this->decodedFields = is_array($fields) ? $fields : throw CertificateException::unreadable();
+            $this->decoded = $x509;
         }
+
+        return $this->decoded;
+    }
+
+    /**
+     * The decoded certificate's fields, as phpseclib maps them.
+     *
+     * @return array<string, mixed>
+     */
+    protected function decodedFields(): array
+    {
+        $this->decoded();
+
+        return $this->decodedFields ?? throw CertificateException::unreadable();
     }
 }

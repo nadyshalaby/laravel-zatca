@@ -18,9 +18,9 @@ interface LineItemInterface
     public function getName(): string;
 
     /**
-     * Get the quantity.
+     * Get the quantity (BT-129), as priced: whole units with up to six decimals.
      */
-    public function getQuantity(): float;
+    public function getQuantity(): string;
 
     /**
      * Get the unit code (e.g., 'PCE', 'KGM').
@@ -28,9 +28,9 @@ interface LineItemInterface
     public function getUnitCode(): string;
 
     /**
-     * Get the unit price (before VAT).
+     * Get the unit price before VAT (BT-146), as priced.
      */
-    public function getUnitPrice(): float;
+    public function getUnitPrice(): string;
 
     /**
      * Get the VAT category.
@@ -38,9 +38,9 @@ interface LineItemInterface
     public function getVatCategory(): VatCategory;
 
     /**
-     * Get the VAT rate (percentage).
+     * Get the VAT rate (BT-152), a percentage with two decimals.
      */
-    public function getVatRate(): float;
+    public function getVatRate(): string;
 
     /**
      * Get the VAT exemption reason (if applicable).
@@ -48,32 +48,46 @@ interface LineItemInterface
     public function getVatExemptionReason(): ?VatExemptionReason;
 
     /**
-     * Get the line discount amount.
+     * Get the line amount, the quantity times the unit price, as priced.
      */
-    public function getDiscount(): float;
+    public function getLineAmount(): string;
 
     /**
-     * Get the line subtotal (quantity * unit price - discount).
+     * Get the line discount (BT-136), as priced.
      */
-    public function getSubtotal(): float;
+    public function getDiscount(): string;
 
     /**
-     * Get the line VAT amount.
+     * Whether the line carries a discount.
      */
-    public function getVatAmount(): float;
+    public function hasDiscount(): bool;
 
     /**
-     * Get the line total (subtotal + VAT).
+     * Get the line net (BT-131), the line amount less the discount, as priced.
      */
-    public function getTotal(): float;
+    public function getSubtotal(): string;
+
+    /**
+     * Get the line VAT (KSA-11), rounded once from the net, as priced.
+     */
+    public function getVatAmount(): string;
+
+    /**
+     * Get the line amount with VAT (KSA-12), the net plus the line VAT, as priced.
+     */
+    public function getTotal(): string;
 
     /**
      * Get additional item identifiers (e.g., SKU, barcode).
+     *
+     * @return array<string, mixed>
      */
     public function getIdentifiers(): array;
 
     /**
      * Convert to array.
+     *
+     * @return array<string, mixed>
      */
     public function toArray(): array;
 }
