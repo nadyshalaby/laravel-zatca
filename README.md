@@ -22,8 +22,18 @@ This package supports Phase 2 requirements including:
 
 ## Installation
 
+The package lives in the private repository `nadyshalaby/laravel-zatca`. Add it to the host app's `composer.json` as a `vcs` repository:
+
+```json
+"repositories": [
+    { "type": "vcs", "url": "https://github.com/nadyshalaby/laravel-zatca" }
+]
+```
+
+Then require it, with a GitHub token that can read the repository handed to Composer through the environment for that one command, never written to `auth.json` or any file:
+
 ```bash
-composer require corecave/laravel-zatca
+COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"$(gh auth token)\"}}" composer require corecave/laravel-zatca:^2.0
 ```
 
 Publish the configuration file:
@@ -435,7 +445,7 @@ try {
 
 ## Changelog
 
-### Unreleased
+### v2.0.0 (2026-10-17)
 
 #### Changed
 
